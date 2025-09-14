@@ -1,0 +1,41 @@
+---
+services:
+  yt-llm-service:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: yt-llm-service:latest
+    container_name: yt-llm-service
+    restart: unless-stopped
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      - 1.1.1.1
+    ports:
+      - "8002:8002"
+    volumes:
+      - ../yt-backend/tmp:/app/tmp
+      - ../yt-backend/output:/app/output
+      - ../yt-backend/logs:/app/logs
+      - /home/amlucas/.mozilla/firefox:/home/app/.mozilla/firefox:ro
+      - /home/amlucas/.config/google-chrome:/home/app/.config/google-chrome:ro
+    environment:
+      - DEVICE=${DEVICE:-cuda}
+      - COMPUTE_TYPE=${COMPUTE_TYPE:-float16}
+      - WHISPER_MODEL=${WHISPER_MODEL:-large-v3-turbo}
+      - BATCH_SIZE=${BATCH_SIZE:-16}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - TEMP_DIR=/app/tmp
+      - OUTPUT_DIR=/app/output
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - TF_CPP_MIN_LOG_LEVEL=2
+      - CUDA_VISIBLE_DEVICES=0
+      - TF_FORCE_GPU_ALLOW_GROWTH=true
+      - MPLCONFIGDIR=/home/app/.config/matplotlib
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

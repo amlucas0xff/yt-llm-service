@@ -1,0 +1,220 @@
+"""
+Transcription service for WhisperX-based audio transcription with speaker diarization
+Adapted for the LLM service
+"""
+
+import os
+import torch
+from typing import Optional, Dict, Any, List
+from pathlib import Path
+
+from config import Config
+from simple_logger import log_action
+
+
+# Simple logging setup for the LLM service
+import logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+class TranscriptionService:
+    """Service for handling audio transcription with WhisperX"""
+    
+    def __init__(self, config: Config, use_gpu: bool = True):
+        """
+        Initialize transcription service
+        
+        Args:
+            config: Application configuration
+            use_gpu: Whether to use GPU acceleration if available
+        """
+        self.config = config
+        
+        # Determine device and compute type based on availability and preference
+        if use_gpu and torch.cuda.is_available():
+            self.device = config.DEVICE if config.DEVICE in ['cuda', 'cpu'] else "cuda"
+            self.compute_type = config.COMPUTE_TYPE
+            logger.info("GPU acceleration enabled for transcription")
+        else:
+            self.device = "cpu"
+            self.compute_type = "int8"
+            if use_gpu:
+                logger.warning("GPU requested but not available, falling back to CPU")
+            else:
+                logger.info("Using CPU for transcription")
+        
+        # Initialize WhisperX model lazily
+        self.model = None
+        self.model_a = None
+        self.metadata = None
+        
+        logger.info(f"TranscriptionService initialized with device: {self.device}")
+    
+    def _load_model(self):
+        """Lazy load the WhisperX model"""
+        if self.model is None:
+            try:
+                import whisperx
+                logger.info(f"Loading WhisperX model: {self.config.WHISPER_MODEL}")
+                
+                self.model = whisperx.load_model(
+                    self.config.WHISPER_MODEL, 
+                    self.device, 
+                    compute_type=self.compute_type
+                )
+                
+                # Load alignment model
+                self.model_a, self.metadata = whisperx.load_align_model(
+                    language_code="en", 
+                    device=self.device
+                )
+                
+                logger.info("WhisperX models loaded successfully")
+            except Exception as e:
+                logger.error(f"Failed to load WhisperX model: {e}")
+                raise RuntimeError(f"Model loading failed: {e}")
+    
+    def transcribe_audio(
+        self, 
+        audio_path: str | Path, 
+        min_speakers: Optional[int] = None,
+        max_speakers: Optional[int] = None,
+        batch_size: int = None,
+        verbose: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Transcribe audio file with optional speaker diarization
+        
+        Args:
+            audio_path: Path to audio file
+            min_speakers: Minimum number of speakers for diarization
+            max_speakers: Maximum number of speakers for diarization
+            batch_size: Batch size for processing
+            verbose: Whether to log detailed progress
+            
+        Returns:
+            Dictionary containing transcription results with segments and metadata
+        """
+        audio_path = str(audio_path)
+        batch_size = batch_size or self.config.BATCH_SIZE
+        
+        if not os.path.exists(audio_path):
+            raise FileNotFoundError(f"Audio file not found: {audio_path}")
+        
+        log_action(f"Starting audio transcription for file: {audio_path}")
+        
+        if verbose:
+            logger.info(f"Starting transcription of: {audio_path}")
+            logger.info(f"Device: {self.device}, Batch size: {batch_size}")
+            if min_speakers or max_speakers:
+                logger.info(f"Speaker diarization enabled: min={min_speakers}, max={max_speakers}")
+        
+        try:
+            # Lazy load model
+            self._load_model()
+            
+            import whisperx
+            
+            # Load audio
+            audio = whisperx.load_audio(audio_path)
+            
+            # Transcribe
+            result = self.model.transcribe(audio, batch_size=batch_size)
+            
+            # Align
+            result = whisperx.align(
+                result["segments"], 
+                self.model_a, 
+                self.metadata, 
+                audio, 
+                self.device, 
+                return_char_alignments=False
+            )
+            
+            # Diarization if requested
+            if min_speakers or max_speakers:
+                try:
+                    diarize_model = whisperx.DiarizationPipeline(
+                        use_auth_token=self.config.HF_TOKEN, 
+                        device=self.device
+                    )
+                    
+                    diarize_segments = diarize_model(
+                        audio, 
+                        min_speakers=min_speakers, 
+                        max_speakers=max_speakers
+                    )
+                    
+                    result = whisperx.assign_word_speakers(diarize_segments, result)
+                    
+                except Exception as e:
+                    logger.warning(f"Speaker diarization failed: {e}")
+            
+            # Add metadata about transcription process
+            result['metadata'] = {
+                'device_used': self.device,
+                'compute_type': self.compute_type,
+                'model': self.config.WHISPER_MODEL,
+                'batch_size': batch_size,
+                'speakers_detected': self._count_unique_speakers(result),
+                'audio_file': audio_path
+            }
+            
+            if verbose:
+                logger.info(f"Transcription completed successfully")
+                logger.info(f"Language detected: {result.get('language', 'unknown')}")
+                logger.info(f"Segments generated: {len(result.get('segments', []))}")
+                if result['metadata']['speakers_detected'] > 0:
+                    logger.info(f"Speakers detected: {result['metadata']['speakers_detected']}")
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Transcription failed for {audio_path}: {str(e)}")
+            raise RuntimeError(f"Transcription failed: {str(e)}")
+    
+    def _count_unique_speakers(self, result: Dict[str, Any]) -> int:
+        """Count unique speakers in the transcription result"""
+        speakers = set()
+        for segment in result.get('segments', []):
+            if 'speaker' in segment:
+                speakers.add(segment['speaker'])
+            # Also check words for speaker info
+            for word in segment.get('words', []):
+                if 'speaker' in word:
+                    speakers.add(word['speaker'])
+        return len(speakers)
+    
+    def is_available(self) -> bool:
+        """Check if transcription service is available (all dependencies installed)"""
+        try:
+            import whisperx
+            import torch
+            return True
+        except ImportError as e:
+            logger.warning(f"Transcription service not available: {e}")
+            return False
+    
+    def get_device_info(self) -> Dict[str, Any]:
+        """Get information about the compute device being used"""
+        info = {
+            'device': self.device,
+            'compute_type': self.compute_type,
+            'torch_version': torch.__version__,
+        }
+        
+        if self.device == 'cuda':
+            info.update({
+                'cuda_available': torch.cuda.is_available(),
+                'cuda_version': torch.version.cuda,
+                'gpu_count': torch.cuda.device_count(),
+                'current_gpu': torch.cuda.current_device() if torch.cuda.is_available() else None,
+                'gpu_name': torch.cuda.get_device_name() if torch.cuda.is_available() else None,
+                'gpu_memory': {
+                    'allocated': torch.cuda.memory_allocated() if torch.cuda.is_available() else 0,
+                    'cached': torch.cuda.memory_reserved() if torch.cuda.is_available() else 0
+                }
+            })
+        
+        return info

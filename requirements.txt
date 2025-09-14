@@ -1,0 +1,52 @@
+# Core dependencies
+torch>=2.0.0
+tensorflow>=2.13.0
+numpy>=1.24.0
+whisperx>=3.1.1
+pyannote.audio>=3.1.1
+speechbrain>=0.5.15
+tokenizers>=0.21,<0.22
+
+# Audio processing
+ffmpeg-python>=0.2.0
+yt-dlp>=2023.9.24
+curl-cffi>=0.7.4  # For yt-dlp impersonate feature
+moviepy==2.0.0  # This version has the editor module
+
+# Utility packages
+python-dotenv>=1.0.0
+tqdm>=4.66.1
+absl-py>=2.0.0
+requests>=2.31.0
+psutil>=5.9.0  # System monitoring
+
+# API dependencies
+fastapi>=0.104.1
+uvicorn>=0.23.2
+python-multipart>=0.0.6
+pydantic>=2.4.2
+pyannote.audio
+
+# AI services
+openai>=1.0.0  # OpenAI API client for embeddings, summarization, and tagging
+
+# Database dependencies - PostgreSQL via Supabase
+supabase>=2.0.0  # Supabase client for Python
+
+# Optional: GPU support
+# Uncomment if using CUDA
+# torch-cuda>=2.0.0
+
+# Testing dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.1
+pytest-cov>=4.0.0
+pytest-mock>=3.0.0
+httpx>=0.25.0
+grpcio>=1.68.1  # Added explicit grpcio version
+
+# New dependencies
+torchaudio>=2.0.0
+openai-whisper>=20231117
+jinja2>=3.1.2
+fastmcp>=2.5.0
