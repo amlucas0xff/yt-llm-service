@@ -14,9 +14,10 @@ services:
     ports:
       - "8002:8002"
     volumes:
-      - ../yt-backend/tmp:/app/tmp
-      - ../yt-backend/output:/app/output
-      - ../yt-backend/logs:/app/logs
+      - ./data/tmp:/app/tmp
+      - ./data/output:/app/output
+      - ./data/logs:/app/logs
+      - ./data/uploads:/app/uploads
       - /home/amlucas/.mozilla/firefox:/home/app/.mozilla/firefox:ro
       - /home/amlucas/.config/google-chrome:/home/app/.config/google-chrome:ro
     environment:

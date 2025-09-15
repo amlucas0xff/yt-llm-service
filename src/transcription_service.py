@@ -218,3 +218,252 @@ class TranscriptionService:
             })
         
         return info
+
+    def format_for_llm(
+        self,
+        transcription_result: Dict[str, Any],
+        output_format: str = "simple",
+        include_speakers: bool = False,
+        merge_consecutive_speakers: bool = True,
+        remove_filler_words: bool = False
+    ) -> Dict[str, Any]:
+        """
+        Format transcription result for LLM consumption
+
+        Args:
+            transcription_result: The full transcription result from WhisperX
+            output_format: Format type ("simple", "speaker", "structured", "markdown")
+            include_speakers: Whether to include speaker information
+            merge_consecutive_speakers: Whether to merge consecutive segments from same speaker
+            remove_filler_words: Whether to remove common filler words
+
+        Returns:
+            Dictionary with LLM-optimized format
+        """
+        segments = transcription_result.get('segments', [])
+        language = transcription_result.get('language', 'unknown')
+
+        if not segments:
+            return {
+                "success": True,
+                "text": "",
+                "language": language,
+                "metadata": {"word_count": 0}
+            }
+
+        # Process segments based on format
+        if output_format == "simple":
+            return self._format_simple(segments, language, remove_filler_words)
+        elif output_format == "speaker" or include_speakers:
+            return self._format_speaker_aware(segments, language, merge_consecutive_speakers, remove_filler_words)
+        elif output_format == "structured":
+            return self._format_structured(segments, language, merge_consecutive_speakers, remove_filler_words)
+        elif output_format == "markdown":
+            return self._format_markdown(segments, language, merge_consecutive_speakers, remove_filler_words)
+        else:
+            return self._format_simple(segments, language, remove_filler_words)
+
+    def _format_simple(self, segments: List[Dict], language: str, remove_filler_words: bool = False) -> Dict[str, Any]:
+        """Format as simple concatenated text"""
+        texts = []
+
+        for segment in segments:
+            text = segment.get('text', '').strip()
+            if text:
+                if remove_filler_words:
+                    text = self._remove_filler_words(text)
+                texts.append(text)
+
+        full_text = ' '.join(texts).strip()
+
+        return {
+            "success": True,
+            "text": full_text,
+            "language": language,
+            "metadata": {
+                "word_count": len(full_text.split()) if full_text else 0,
+                "segment_count": len(segments),
+                "format": "simple"
+            }
+        }
+
+    def _format_speaker_aware(
+        self,
+        segments: List[Dict],
+        language: str,
+        merge_consecutive: bool = True,
+        remove_filler_words: bool = False
+    ) -> Dict[str, Any]:
+        """Format with speaker information"""
+        speakers = {}
+        current_speaker = None
+        current_text = []
+
+        for segment in segments:
+            text = segment.get('text', '').strip()
+            speaker = segment.get('speaker', 'UNKNOWN')
+
+            if not text:
+                continue
+
+            if remove_filler_words:
+                text = self._remove_filler_words(text)
+
+            if merge_consecutive and speaker == current_speaker:
+                current_text.append(text)
+            else:
+                # Save previous speaker's text
+                if current_speaker and current_text:
+                    if current_speaker not in speakers:
+                        speakers[current_speaker] = []
+                    speakers[current_speaker].append(' '.join(current_text))
+
+                # Start new speaker
+                current_speaker = speaker
+                current_text = [text]
+
+        # Don't forget the last speaker
+        if current_speaker and current_text:
+            if current_speaker not in speakers:
+                speakers[current_speaker] = []
+            speakers[current_speaker].append(' '.join(current_text))
+
+        # Merge all text parts for each speaker
+        for speaker in speakers:
+            speakers[speaker] = ' '.join(speakers[speaker])
+
+        return {
+            "success": True,
+            "speakers": speakers,
+            "language": language,
+            "metadata": {
+                "speaker_count": len(speakers),
+                "segment_count": len(segments),
+                "format": "speaker"
+            }
+        }
+
+    def _format_structured(
+        self,
+        segments: List[Dict],
+        language: str,
+        merge_consecutive: bool = True,
+        remove_filler_words: bool = False
+    ) -> Dict[str, Any]:
+        """Format as structured conversation blocks"""
+        blocks = []
+        current_speaker = None
+        current_text = []
+
+        for segment in segments:
+            text = segment.get('text', '').strip()
+            speaker = segment.get('speaker', 'UNKNOWN')
+
+            if not text:
+                continue
+
+            if remove_filler_words:
+                text = self._remove_filler_words(text)
+
+            if merge_consecutive and speaker == current_speaker:
+                current_text.append(text)
+            else:
+                # Save previous speaker's block
+                if current_speaker and current_text:
+                    blocks.append({
+                        "speaker": current_speaker,
+                        "text": ' '.join(current_text)
+                    })
+
+                # Start new speaker
+                current_speaker = speaker
+                current_text = [text]
+
+        # Don't forget the last speaker
+        if current_speaker and current_text:
+            blocks.append({
+                "speaker": current_speaker,
+                "text": ' '.join(current_text)
+            })
+
+        return {
+            "success": True,
+            "blocks": blocks,
+            "language": language,
+            "metadata": {
+                "block_count": len(blocks),
+                "segment_count": len(segments),
+                "format": "structured"
+            }
+        }
+
+    def _format_markdown(
+        self,
+        segments: List[Dict],
+        language: str,
+        merge_consecutive: bool = True,
+        remove_filler_words: bool = False
+    ) -> Dict[str, Any]:
+        """Format as markdown with speaker headings"""
+        markdown_parts = []
+        current_speaker = None
+        current_text = []
+        speaker_counter = {}
+
+        for segment in segments:
+            text = segment.get('text', '').strip()
+            speaker = segment.get('speaker', 'UNKNOWN')
+
+            if not text:
+                continue
+
+            if remove_filler_words:
+                text = self._remove_filler_words(text)
+
+            if merge_consecutive and speaker == current_speaker:
+                current_text.append(text)
+            else:
+                # Save previous speaker's section
+                if current_speaker and current_text:
+                    # Create readable speaker name
+                    if current_speaker not in speaker_counter:
+                        speaker_counter[current_speaker] = len(speaker_counter) + 1
+
+                    speaker_name = f"Speaker {speaker_counter[current_speaker]}"
+                    markdown_parts.append(f"## {speaker_name}\n\n{' '.join(current_text)}\n")
+
+                # Start new speaker
+                current_speaker = speaker
+                current_text = [text]
+
+        # Don't forget the last speaker
+        if current_speaker and current_text:
+            if current_speaker not in speaker_counter:
+                speaker_counter[current_speaker] = len(speaker_counter) + 1
+
+            speaker_name = f"Speaker {speaker_counter[current_speaker]}"
+            markdown_parts.append(f"## {speaker_name}\n\n{' '.join(current_text)}\n")
+
+        markdown_text = '\n'.join(markdown_parts).strip()
+
+        return {
+            "success": True,
+            "text": markdown_text,
+            "language": language,
+            "metadata": {
+                "speaker_count": len(speaker_counter),
+                "segment_count": len(segments),
+                "format": "markdown"
+            }
+        }
+
+    def _remove_filler_words(self, text: str) -> str:
+        """Remove common filler words"""
+        filler_words = {
+            'um', 'uh', 'er', 'ah', 'em', 'hmm', 'mm', 'mhm',
+            'erm', 'uh-huh', 'mm-hmm', 'eh', 'eh?'
+        }
+
+        words = text.split()
+        filtered_words = [word for word in words if word.lower().strip('.,!?;:') not in filler_words]
+        return ' '.join(filtered_words)

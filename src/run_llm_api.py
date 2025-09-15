@@ -79,6 +79,44 @@ class HealthResponse(BaseModel):
     device_info: dict
 
 
+class LLMTranscriptionRequest(BaseModel):
+    """Request model for LLM-optimized transcription"""
+
+    audio_file_path: str
+    min_speakers: Optional[int] = None
+    max_speakers: Optional[int] = None
+    batch_size: Optional[int] = None
+    output_format: str = "simple"  # simple, speaker, structured, markdown
+    remove_filler_words: bool = False
+    merge_consecutive_speakers: bool = True
+    verbose: bool = True
+
+
+class YouTubeLLMTranscriptionRequest(BaseModel):
+    """Request model for YouTube LLM-optimized transcription"""
+
+    youtube_url: str
+    min_speakers: Optional[int] = None
+    max_speakers: Optional[int] = None
+    batch_size: Optional[int] = None
+    output_format: str = "simple"  # simple, speaker, structured, markdown
+    remove_filler_words: bool = False
+    merge_consecutive_speakers: bool = True
+    verbose: bool = True
+
+
+class LLMTranscriptionResponse(BaseModel):
+    """Response model for LLM-optimized transcription"""
+
+    success: bool
+    text: Optional[str] = None
+    speakers: Optional[dict] = None
+    blocks: Optional[list] = None
+    language: Optional[str] = None
+    metadata: dict
+    error: Optional[str] = None
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
@@ -149,6 +187,87 @@ async def transcribe_audio(request: TranscriptionRequest):
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
+@app.post("/transcribe-llm", response_model=LLMTranscriptionResponse)
+async def transcribe_audio_llm(request: LLMTranscriptionRequest):
+    """
+    Transcribe audio file and format for LLM consumption
+    """
+    log_action(
+        f"Received LLM transcription request for audio file: {request.audio_file_path}"
+    )
+    logger.info(f"Received LLM transcription request for: {request.audio_file_path}")
+    logger.debug(
+        f"Request parameters: min_speakers={request.min_speakers}, max_speakers={request.max_speakers}, "
+        f"batch_size={request.batch_size}, output_format={request.output_format}, "
+        f"remove_filler_words={request.remove_filler_words}, verbose={request.verbose}"
+    )
+
+    try:
+        # Validate audio file exists
+        audio_path = Path(request.audio_file_path)
+        logger.debug(f"Checking if audio file exists: {audio_path}")
+        logger.debug(f"Current working directory: {os.getcwd()}")
+        logger.debug(f"Audio path absolute: {audio_path.absolute()}")
+
+        if not audio_path.exists():
+            logger.error(f"Audio file not found: {request.audio_file_path}")
+            logger.debug(
+                f"Files in parent directory: {list(audio_path.parent.iterdir()) if audio_path.parent.exists() else 'Parent does not exist'}"
+            )
+            raise HTTPException(
+                status_code=404,
+                detail=f"Audio file not found: {request.audio_file_path}",
+            )
+
+        file_size = audio_path.stat().st_size
+        logger.info(
+            f"Audio file found: {request.audio_file_path} ({file_size} bytes, {file_size / 1024 / 1024:.2f} MB)"
+        )
+
+        # Perform transcription
+        result = transcription_service.transcribe_audio(
+            audio_path=request.audio_file_path,
+            min_speakers=request.min_speakers,
+            max_speakers=request.max_speakers,
+            batch_size=request.batch_size,
+            verbose=request.verbose,
+        )
+
+        # Format for LLM consumption
+        llm_result = transcription_service.format_for_llm(
+            transcription_result=result,
+            output_format=request.output_format,
+            include_speakers=(request.output_format in ["speaker", "structured", "markdown"]),
+            merge_consecutive_speakers=request.merge_consecutive_speakers,
+            remove_filler_words=request.remove_filler_words
+        )
+
+        # Build response based on format
+        response_data = {
+            "success": True,
+            "language": result.get("language"),
+            "metadata": llm_result.get("metadata", {}),
+            "error": None,
+        }
+
+        # Add format-specific fields
+        if "text" in llm_result:
+            response_data["text"] = llm_result["text"]
+        if "speakers" in llm_result:
+            response_data["speakers"] = llm_result["speakers"]
+        if "blocks" in llm_result:
+            response_data["blocks"] = llm_result["blocks"]
+
+        return LLMTranscriptionResponse(**response_data)
+
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
 @app.post("/transcribe-youtube", response_model=TranscriptionResponse)
 async def transcribe_youtube(request: YouTubeTranscriptionRequest):
     """
@@ -202,6 +321,95 @@ async def transcribe_youtube(request: YouTubeTranscriptionRequest):
             metadata=result_metadata,
             error=None,
         )
+
+    except ValueError as e:
+        # Invalid URL or similar validation errors
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        # Download or transcription failures
+        logger.error(f"Runtime error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        # Unexpected errors
+        logger.error(f"Unexpected error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+@app.post("/transcribe-youtube-llm", response_model=LLMTranscriptionResponse)
+async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
+    """
+    Download audio from YouTube URL and transcribe for LLM consumption
+    """
+    log_action(f"Received YouTube LLM transcription request for URL: {request.youtube_url}")
+    logger.info(f"Received YouTube LLM transcription request for: {request.youtube_url}")
+    logger.debug(
+        f"Request parameters: min_speakers={request.min_speakers}, max_speakers={request.max_speakers}, "
+        f"batch_size={request.batch_size}, output_format={request.output_format}, "
+        f"remove_filler_words={request.remove_filler_words}, verbose={request.verbose}"
+    )
+
+    try:
+        # Step 1: Download audio from YouTube
+        logger.info(f"Downloading audio from YouTube: {request.youtube_url}")
+        download_result = audio_downloader.download_audio(
+            youtube_url=request.youtube_url, verbose=request.verbose
+        )
+
+        audio_path = download_result["audio_path"]
+        video_id = download_result["video_id"]
+        file_size = download_result["file_size"]
+
+        logger.info(f"Audio downloaded successfully: {audio_path} ({file_size} bytes)")
+
+        # Step 2: Transcribe the downloaded audio
+        logger.info(f"Starting transcription for video: {video_id}")
+        result = transcription_service.transcribe_audio(
+            audio_path=audio_path,
+            min_speakers=request.min_speakers,
+            max_speakers=request.max_speakers,
+            batch_size=request.batch_size,
+            verbose=request.verbose,
+        )
+
+        # Step 3: Format for LLM consumption
+        llm_result = transcription_service.format_for_llm(
+            transcription_result=result,
+            output_format=request.output_format,
+            include_speakers=(request.output_format in ["speaker", "structured", "markdown"]),
+            merge_consecutive_speakers=request.merge_consecutive_speakers,
+            remove_filler_words=request.remove_filler_words
+        )
+
+        # Add download metadata to the response
+        llm_metadata = llm_result.get("metadata", {})
+        llm_metadata.update(
+            {
+                "video_id": video_id,
+                "download_file_size": file_size,
+                "audio_path": audio_path,
+            }
+        )
+
+        logger.info(f"LLM transcription completed successfully for video: {video_id}")
+
+        # Build response based on format
+        response_data = {
+            "success": True,
+            "language": result.get("language"),
+            "metadata": llm_metadata,
+            "error": None,
+        }
+
+        # Add format-specific fields
+        if "text" in llm_result:
+            response_data["text"] = llm_result["text"]
+        if "speakers" in llm_result:
+            response_data["speakers"] = llm_result["speakers"]
+        if "blocks" in llm_result:
+            response_data["blocks"] = llm_result["blocks"]
+
+        return LLMTranscriptionResponse(**response_data)
 
     except ValueError as e:
         # Invalid URL or similar validation errors
@@ -288,6 +496,116 @@ async def transcribe_file(
 
     except Exception as e:
         logger.error(f"Failed to transcribe file: {str(e)}")
+        # Clean up on error
+        if os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/transcribe-file-llm")
+async def transcribe_file_llm(
+    file: UploadFile = File(...),
+    min_speakers: Optional[int] = Form(None),
+    max_speakers: Optional[int] = Form(None),
+    batch_size: Optional[int] = Form(None),
+    output_format: str = Form("simple"),
+    remove_filler_words: bool = Form(False),
+    merge_consecutive_speakers: bool = Form(True),
+    verbose: bool = Form(True),
+):
+    """
+    Transcribe an uploaded video file and format for LLM consumption
+
+    Args:
+        file: Video file to transcribe
+        min_speakers: Minimum number of speakers for diarization
+        max_speakers: Maximum number of speakers for diarization
+        batch_size: Batch size for processing
+        output_format: Format type ("simple", "speaker", "structured", "markdown")
+        remove_filler_words: Whether to remove common filler words
+        merge_consecutive_speakers: Whether to merge consecutive segments from same speaker
+        verbose: Enable verbose output
+
+    Returns:
+        LLM-optimized transcription results
+    """
+    logger.info(f"Received file upload LLM request: {file.filename}")
+
+    # Create temporary file to store the upload
+    temp_dir = tempfile.mkdtemp()
+    temp_file_path = os.path.join(temp_dir, file.filename)
+
+    try:
+        # Save uploaded file
+        with open(temp_file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+
+        logger.info(f"Saved uploaded file to: {temp_file_path}")
+
+        # Extract audio from video file
+        audio_path = audio_downloader.extract_audio_from_file(temp_file_path)
+        logger.info(f"Extracted audio to: {audio_path}")
+
+        # Perform transcription
+        result = transcription_service.transcribe_audio(
+            audio_path=audio_path,
+            min_speakers=min_speakers,
+            max_speakers=max_speakers,
+            batch_size=batch_size,
+            verbose=verbose,
+        )
+
+        # Format for LLM consumption
+        llm_result = transcription_service.format_for_llm(
+            transcription_result=result,
+            output_format=output_format,
+            include_speakers=(output_format in ["speaker", "structured", "markdown"]),
+            merge_consecutive_speakers=merge_consecutive_speakers,
+            remove_filler_words=remove_filler_words
+        )
+
+        logger.info("LLM transcription completed successfully")
+
+        # Clean up temporary files
+        try:
+            os.remove(audio_path)
+            shutil.rmtree(temp_dir)
+            logger.info("Cleaned up temporary files")
+        except Exception as e:
+            logger.warning(f"Failed to clean up temporary files: {e}")
+
+        # Add file metadata to the response
+        llm_metadata = llm_result.get("metadata", {})
+        llm_metadata.update(
+            {
+                "filename": file.filename,
+                "min_speakers": min_speakers,
+                "max_speakers": max_speakers,
+                "batch_size": batch_size,
+                "output_format": output_format,
+            }
+        )
+
+        # Build response based on format
+        response_data = {
+            "success": True,
+            "language": result.get("language"),
+            "metadata": llm_metadata,
+            "error": None,
+        }
+
+        # Add format-specific fields
+        if "text" in llm_result:
+            response_data["text"] = llm_result["text"]
+        if "speakers" in llm_result:
+            response_data["speakers"] = llm_result["speakers"]
+        if "blocks" in llm_result:
+            response_data["blocks"] = llm_result["blocks"]
+
+        return response_data
+
+    except Exception as e:
+        logger.error(f"Failed to transcribe file for LLM: {str(e)}")
         # Clean up on error
         if os.path.exists(temp_dir):
             shutil.rmtree(temp_dir, ignore_errors=True)
@@ -428,9 +746,17 @@ async def root():
             "transcribe": "/transcribe",
             "transcribe-youtube": "/transcribe-youtube",
             "transcribe_file": "/transcribe_file",
+            "transcribe-llm": "/transcribe-llm",
+            "transcribe-youtube-llm": "/transcribe-youtube-llm",
+            "transcribe-file-llm": "/transcribe-file-llm",
             "extract-metadata": "/extract-metadata",
             "docs": "/docs",
         },
+        "llm_endpoints": {
+            "description": "Endpoints that format transcription data for LLM consumption",
+            "formats": ["simple", "speaker", "structured", "markdown"],
+            "features": ["filler word removal", "speaker merging", "clean text output"]
+        }
     }
 
 

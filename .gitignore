@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Data directories (contain user uploads and processing files)
+data/uploads/*
+data/tmp/*
+data/output/*
+data/logs/*
+
+# Keep directory structure
+!data/uploads/.gitkeep
+!data/tmp/.gitkeep
+!data/output/.gitkeep
+!data/logs/.gitkeep
+
+# Docker
+*.log
+.docker/
+
+# OS
+.DS_Store
+Thumbs.db
