@@ -1,4 +1,7 @@
 ---
+# Docker Compose configuration for YT-LLM Service
+# Copy this file to docker-compose.yml and modify as needed
+
 services:
   yt-llm-service:
     build:
@@ -14,28 +17,42 @@ services:
     ports:
       - "8002:8002"
     volumes:
+      # Source code (for development)
       - ./src:/app/src
+
+      # Data directories
       - ./data/tmp:/app/tmp
       - ${HOST_OUTPUT_DIR:-./data/output}:/app/output
       - ./data/logs:/app/logs
       - ./data/uploads:/app/uploads
+
       # Optional browser data volumes for YouTube cookie authentication
       # Uncomment and modify paths as needed for your system
       # - ${HOST_FIREFOX_DIR:-~/.mozilla/firefox}:/home/app/.mozilla/firefox:ro
       # - ${HOST_CHROME_DIR:-~/.config/google-chrome}:/home/app/.config/google-chrome:ro
+
     environment:
+      # Core configuration
       - DEVICE=${DEVICE:-cuda}
       - COMPUTE_TYPE=${COMPUTE_TYPE:-float16}
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3-turbo}
       - BATCH_SIZE=${BATCH_SIZE:-16}
       - HF_TOKEN=${HF_TOKEN:-}
+
+      # Directory paths
       - TEMP_DIR=/app/tmp
       - OUTPUT_DIR=/app/output
+
+      # Logging
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+      # TensorFlow/CUDA configuration
       - TF_CPP_MIN_LOG_LEVEL=2
-      - CUDA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
       - TF_FORCE_GPU_ALLOW_GROWTH=true
       - MPLCONFIGDIR=/home/app/.config/matplotlib
+
+    # GPU support (NVIDIA Docker required)
     deploy:
       resources:
         reservations:

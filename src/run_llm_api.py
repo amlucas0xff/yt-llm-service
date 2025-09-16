@@ -16,14 +16,17 @@ from transcription_service import TranscriptionService
 from audio_downloader import AudioDownloader
 from simple_logger import log_action
 
-# Configure logging
+# Initialize configuration first
+config = Config()
+
+# Configure logging using config value
 logging.basicConfig(
-    level=logging.DEBUG, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=getattr(logging, config.LOG_LEVEL.upper(), logging.INFO),
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
-# Initialize configuration and services
-config = Config()
+# Initialize services
 transcription_service = TranscriptionService(config)
 audio_downloader = AudioDownloader(temp_dir=config.TEMP_DIR)
 
@@ -258,6 +261,18 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
         if "blocks" in llm_result:
             response_data["blocks"] = llm_result["blocks"]
 
+        # Save transcription to disk
+        try:
+            saved_path = transcription_service.save_transcription_to_disk(
+                media_filename=request.audio_file_path,
+                transcription_result=result,
+                llm_result=llm_result
+            )
+            if saved_path:
+                logger.info(f"Transcription saved to: {saved_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save transcription to disk: {str(e)}")
+
         return LLMTranscriptionResponse(**response_data)
 
     except FileNotFoundError as e:
@@ -288,6 +303,7 @@ async def transcribe_youtube(request: YouTubeTranscriptionRequest):
 
         audio_path = download_result["audio_path"]
         video_id = download_result["video_id"]
+        video_title = download_result.get("title", "")
         file_size = download_result["file_size"]
 
         logger.info(f"Audio downloaded successfully: {audio_path} ({file_size} bytes)")
@@ -358,6 +374,7 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
 
         audio_path = download_result["audio_path"]
         video_id = download_result["video_id"]
+        video_title = download_result.get("title", "")
         file_size = download_result["file_size"]
 
         logger.info(f"Audio downloaded successfully: {audio_path} ({file_size} bytes)")
@@ -408,6 +425,20 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
             response_data["speakers"] = llm_result["speakers"]
         if "blocks" in llm_result:
             response_data["blocks"] = llm_result["blocks"]
+
+        # Save transcription to disk
+        try:
+            # Use video title for storage instead of URL, fallback to URL if no title
+            storage_name = video_title if video_title.strip() else request.youtube_url
+            saved_path = transcription_service.save_transcription_to_disk(
+                media_filename=storage_name,
+                transcription_result=result,
+                llm_result=llm_result
+            )
+            if saved_path:
+                logger.info(f"Transcription saved to: {saved_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save transcription to disk: {str(e)}")
 
         return LLMTranscriptionResponse(**response_data)
 
@@ -601,6 +632,18 @@ async def transcribe_file_llm(
             response_data["speakers"] = llm_result["speakers"]
         if "blocks" in llm_result:
             response_data["blocks"] = llm_result["blocks"]
+
+        # Save transcription to disk
+        try:
+            saved_path = transcription_service.save_transcription_to_disk(
+                media_filename=file.filename,
+                transcription_result=result,
+                llm_result=llm_result
+            )
+            if saved_path:
+                logger.info(f"Transcription saved to: {saved_path}")
+        except Exception as e:
+            logger.warning(f"Failed to save transcription to disk: {str(e)}")
 
         return response_data
 

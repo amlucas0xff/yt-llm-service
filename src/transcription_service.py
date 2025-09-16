@@ -10,6 +10,7 @@ from pathlib import Path
 
 from config import Config
 from simple_logger import log_action
+from storage_service import StorageService
 
 
 # Simple logging setup for the LLM service
@@ -48,7 +49,10 @@ class TranscriptionService:
         self.model = None
         self.model_a = None
         self.metadata = None
-        
+
+        # Initialize storage service
+        self.storage_service = StorageService(config.OUTPUT_DIR)
+
         logger.info(f"TranscriptionService initialized with device: {self.device}")
     
     def _load_model(self):
@@ -467,3 +471,129 @@ class TranscriptionService:
         words = text.split()
         filtered_words = [word for word in words if word.lower().strip('.,!?;:') not in filler_words]
         return ' '.join(filtered_words)
+
+    def save_transcription_to_disk(
+        self,
+        media_filename: str,
+        transcription_result: Dict[str, Any],
+        llm_result: Dict[str, Any]
+    ) -> Optional[str]:
+        """
+        Save transcription to persistent storage
+
+        Args:
+            media_filename: Original media filename/URL
+            transcription_result: Raw transcription result from WhisperX
+            llm_result: Formatted LLM result
+
+        Returns:
+            Path to saved file if successful, None if failed
+        """
+        try:
+            # Determine transcription text based on format
+            transcription_text = self._extract_transcription_text(llm_result)
+
+            # Combine metadata from both results
+            combined_metadata = self._combine_metadata(transcription_result, llm_result)
+
+            # Save to disk
+            file_path = self.storage_service.save_transcription(
+                media_filename=media_filename,
+                transcription_text=transcription_text,
+                metadata=combined_metadata,
+                language=transcription_result.get('language')
+            )
+
+            logger.info(f"Transcription saved to disk: {file_path}")
+            return file_path
+
+        except Exception as e:
+            logger.error(f"Failed to save transcription to disk: {str(e)}")
+            return None
+
+    def _extract_transcription_text(self, llm_result: Dict[str, Any]) -> str:
+        """
+        Extract formatted transcription text from LLM result
+
+        Args:
+            llm_result: Formatted LLM result
+
+        Returns:
+            Formatted transcription text with speaker indicators if applicable
+        """
+        # Handle different output formats
+        if "text" in llm_result:
+            return llm_result["text"]
+        elif "speakers" in llm_result:
+            # Format speakers as numbered sections
+            speakers_dict = llm_result["speakers"]
+            if speakers_dict:
+                parts = []
+                speaker_mapping = {}
+                speaker_counter = 1
+
+                for speaker_id, text in speakers_dict.items():
+                    if speaker_id not in speaker_mapping:
+                        speaker_mapping[speaker_id] = speaker_counter
+                        speaker_counter += 1
+
+                    speaker_num = speaker_mapping[speaker_id]
+                    parts.append(f"Speaker {speaker_num}: {text}")
+
+                return "\n\n".join(parts)
+        elif "blocks" in llm_result:
+            # Format blocks as conversation
+            blocks = llm_result["blocks"]
+            if blocks:
+                parts = []
+                speaker_mapping = {}
+                speaker_counter = 1
+
+                for block in blocks:
+                    speaker_id = block.get("speaker", "UNKNOWN")
+                    text = block.get("text", "")
+
+                    if speaker_id not in speaker_mapping:
+                        speaker_mapping[speaker_id] = speaker_counter
+                        speaker_counter += 1
+
+                    speaker_num = speaker_mapping[speaker_id]
+                    parts.append(f"Speaker {speaker_num}: {text}")
+
+                return "\n\n".join(parts)
+
+        return ""
+
+    def _combine_metadata(
+        self,
+        transcription_result: Dict[str, Any],
+        llm_result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Combine metadata from transcription and LLM results
+
+        Args:
+            transcription_result: Raw transcription result
+            llm_result: Formatted LLM result
+
+        Returns:
+            Combined metadata dictionary
+        """
+        combined = {}
+
+        # Add transcription metadata
+        if "metadata" in transcription_result:
+            combined.update(transcription_result["metadata"])
+
+        # Add LLM metadata
+        if "metadata" in llm_result:
+            llm_metadata = llm_result["metadata"]
+            combined.update(llm_metadata)
+
+        # Add format-specific information
+        if "speakers" in llm_result:
+            combined["speaker_count"] = len(llm_result["speakers"]) if llm_result["speakers"] else 0
+        if "blocks" in llm_result:
+            combined["block_count"] = len(llm_result["blocks"]) if llm_result["blocks"] else 0
+
+        return combined

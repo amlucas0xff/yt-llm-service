@@ -60,6 +60,51 @@ class AudioDownloader:
 
         return any(re.match(pattern, url) for pattern in youtube_patterns)
 
+    def _extract_video_title(self, url: str) -> str:
+        """Extract video title from YouTube URL using yt-dlp"""
+        try:
+            import yt_dlp
+
+            # Configure yt-dlp options for metadata extraction only
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "extract_flat": False,
+                "skip_download": True,
+            }
+
+            # Try cookies file first, fallback to other methods
+            try:
+                cookie_path = Path("/app/cookies.txt")
+                if (
+                    cookie_path.exists() and cookie_path.stat().st_size > 100
+                ):  # Check if cookies file has content
+                    ydl_opts["cookiefile"] = "/app/cookies.txt"
+                    logger.debug("Using cookies file for title extraction")
+                else:
+                    # Fallback to impersonate option
+                    ydl_opts["impersonate"] = "chrome-131"
+                    logger.debug("Using Chrome impersonation for title extraction")
+            except Exception as e:
+                logger.warning(f"Cookie file check failed, using impersonate: {e}")
+                ydl_opts["impersonate"] = "chrome-131"
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                # Extract info without downloading
+                info = ydl.extract_info(url, download=False)
+                title = info.get("title", "")
+
+                if title:
+                    logger.info(f"Extracted video title: {title}")
+                    return title
+                else:
+                    logger.warning("No title found in video metadata")
+                    return ""
+
+        except Exception as e:
+            logger.warning(f"Failed to extract video title: {e}")
+            return ""
+
     def download_audio(self, youtube_url: str, verbose: bool = True) -> Dict[str, Any]:
         """
         Download audio from YouTube URL
@@ -69,7 +114,7 @@ class AudioDownloader:
             verbose: Enable verbose logging
 
         Returns:
-            Dict containing audio_path, video_id, and metadata
+            Dict containing audio_path, video_id, title, and metadata
 
         Raises:
             ValueError: If URL is invalid
@@ -80,6 +125,10 @@ class AudioDownloader:
 
         video_id = self._extract_video_id(youtube_url)
         logger.info(f"Downloading audio for video: {video_id}")
+
+        # Extract video title using yt-dlp before downloading
+        video_title = self._extract_video_title(youtube_url)
+        logger.info(f"Video title: {video_title}")
 
         # Clean up any existing files for this video
         self._cleanup_old_files(video_id)
@@ -150,6 +199,7 @@ class AudioDownloader:
         return {
             "audio_path": str(audio_path),
             "video_id": video_id,
+            "title": video_title,
             "file_size": file_size,
             "temp_dir": str(self.temp_dir),
         }
