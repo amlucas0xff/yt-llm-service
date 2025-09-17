@@ -263,8 +263,19 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
 
         # Save transcription to disk
         try:
+            # Check if the audio file path is a YouTube URL and extract title for storage
+            media_filename = request.audio_file_path
+            if audio_downloader._validate_url(request.audio_file_path):
+                # Extract video title for YouTube URLs
+                video_title = audio_downloader._extract_video_title(request.audio_file_path)
+                if video_title.strip():
+                    media_filename = video_title
+                    logger.info(f"Using video title for storage: {video_title}")
+                else:
+                    logger.warning("Could not extract video title, using URL")
+
             saved_path = transcription_service.save_transcription_to_disk(
-                media_filename=request.audio_file_path,
+                media_filename=media_filename,
                 transcription_result=result,
                 llm_result=llm_result
             )

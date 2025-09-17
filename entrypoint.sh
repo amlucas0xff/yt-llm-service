@@ -18,10 +18,11 @@ start_api() {
     exec python3 src/run_llm_api.py
 }
 
-# Function to start MCP server (disabled in LLM service)
+# Function to start MCP server
 start_mcp() {
-    echo "MCP server not available in LLM service container"
-    exit 1
+    echo "Starting MCP Server for YouTube Transcription..."
+    cd /app
+    exec python3 simple-mcp-server/run.py
 }
 
 # Function to run CLI (disabled in LLM service)

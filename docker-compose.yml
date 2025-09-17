@@ -21,7 +21,7 @@ services:
       - ./data/uploads:/app/uploads
       # Optional browser data volumes for YouTube cookie authentication
       # Uncomment and modify paths as needed for your system
-      # - ${HOST_FIREFOX_DIR:-~/.mozilla/firefox}:/home/app/.mozilla/firefox:ro
+      - ${HOST_FIREFOX_DIR:-~/.mozilla/firefox}:/home/app/.mozilla/firefox:ro
       # - ${HOST_CHROME_DIR:-~/.config/google-chrome}:/home/app/.config/google-chrome:ro
     environment:
       - DEVICE=${DEVICE:-cuda}

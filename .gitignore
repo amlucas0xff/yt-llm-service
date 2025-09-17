@@ -42,6 +42,9 @@ cookies.txt
 .DS_Store
 Thumbs.db
 
+# Legacy files (old tests, docs, samples)
+legacy/
+
 # Additional cleanup
 *.pyc
 .pytest_cache/
