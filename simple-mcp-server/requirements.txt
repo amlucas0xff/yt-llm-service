@@ -1,0 +1,17 @@
+# FastMCP Server Dependencies
+#
+# This MCP wrapper reuses services from the parent directory (../src/)
+# The parent project handles all ML/audio dependencies (WhisperX, PyTorch, etc.)
+
+# Core MCP dependency
+fastmcp>=2.5.0
+
+# Basic utilities (already in parent but listed for clarity)
+python-dotenv>=1.0.0
+pydantic>=2.4.0
+
+# Optional: For standalone deployment (uncomment if needed)
+# torch>=2.0.0
+# whisperx>=3.1.1
+# yt-dlp>=2023.9.24
+# ffmpeg-python>=0.2.0
