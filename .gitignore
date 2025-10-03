@@ -50,4 +50,4 @@ legacy/
 .pytest_cache/
 .coverage
 htmlcov/
-*.egg-info/
+*.egg-info/logs/
