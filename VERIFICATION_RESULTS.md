@@ -12,7 +12,7 @@ Comprehensive verification confirms that the Code Extraction Suite is properly i
 ### 1. File Isolation - PASSED
 
 #### Master Worktree (Production)
-- Location: `/home/amlucas/Desktop/yt-llm-service`
+- Location: `~/Desktop/yt-llm-service`
 - Branch: `master`
 - Python files: 7 (production only)
 - Code Extraction files: **0** (CORRECT)
@@ -28,7 +28,7 @@ Comprehensive verification confirms that the Code Extraction Suite is properly i
   ```
 
 #### Feature Worktree (Code Extraction)
-- Location: `/home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction`
+- Location: `~/Desktop/yt-llm-service-worktrees/code-extraction`
 - Branch: `feature/code-extraction`
 - Python files: 12 (production + code extraction)
 - Code Extraction files: **5** (CORRECT)
@@ -154,7 +154,7 @@ opencv-python>=4.8.0      # Computer vision and image processing
 ## Directory Structure Verification
 
 ```
-/home/amlucas/Desktop/
+~/Desktop/
 ├── yt-llm-service/                      [master branch]
 │   ├── src/
 │   │   ├── audio_downloader.py          ✓
@@ -195,14 +195,14 @@ opencv-python>=4.8.0      # Computer vision and image processing
 # List worktrees - WORKS
 git worktree list
 # Output:
-# /home/amlucas/Desktop/yt-llm-service                            [master]
-# /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction  [feature/code-extraction]
+# ~/Desktop/yt-llm-service                            [master]
+# ~/Desktop/yt-llm-service-worktrees/code-extraction  [feature/code-extraction]
 
 # Switch to production - WORKS
-cd /home/amlucas/Desktop/yt-llm-service
+cd ~/Desktop/yt-llm-service
 
 # Switch to feature - WORKS
-cd /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction
+cd ~/Desktop/yt-llm-service-worktrees/code-extraction
 
 # Check branch in each - WORKS
 git branch --show-current

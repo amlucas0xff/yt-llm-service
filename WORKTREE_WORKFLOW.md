@@ -5,13 +5,13 @@ This project uses git worktrees to maintain separation between production-ready 
 ## Overview
 
 **Master Worktree** (Production)
-- Location: `/home/amlucas/Desktop/yt-llm-service`
+- Location: `~/Desktop/yt-llm-service`
 - Branch: `master`
 - Purpose: Production-ready, stable code only
 - Status: Clean, deployable at any time
 
 **Feature Worktree** (Code Extraction Beta)
-- Location: `/home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction`
+- Location: `~/Desktop/yt-llm-service-worktrees/code-extraction`
 - Branch: `feature/code-extraction`
 - Purpose: Code Extraction Suite development
 - Status: Beta, under active development
@@ -26,8 +26,8 @@ git worktree list
 
 Output:
 ```
-/home/amlucas/Desktop/yt-llm-service                            [master]
-/home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction  [feature/code-extraction]
+~/Desktop/yt-llm-service                            [master]
+~/Desktop/yt-llm-service-worktrees/code-extraction  [feature/code-extraction]
 ```
 
 ### Switching Between Worktrees
@@ -36,10 +36,10 @@ Simply change directories:
 
 ```bash
 # Work on production code
-cd /home/amlucas/Desktop/yt-llm-service
+cd ~/Desktop/yt-llm-service
 
 # Work on Code Extraction feature
-cd /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction
+cd ~/Desktop/yt-llm-service-worktrees/code-extraction
 ```
 
 No need for `git stash` or `git checkout` - each worktree maintains its own working directory state.
@@ -48,7 +48,7 @@ No need for `git stash` or `git checkout` - each worktree maintains its own work
 
 #### In Master Worktree (Production)
 ```bash
-cd /home/amlucas/Desktop/yt-llm-service
+cd ~/Desktop/yt-llm-service
 
 # Make production fixes/improvements
 git add .
@@ -58,7 +58,7 @@ git push origin master
 
 #### In Feature Worktree (Code Extraction)
 ```bash
-cd /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction
+cd ~/Desktop/yt-llm-service-worktrees/code-extraction
 
 # Work on Code Extraction features
 git add .
@@ -72,14 +72,14 @@ Each worktree can run its own Docker container:
 
 #### Master Worktree
 ```bash
-cd /home/amlucas/Desktop/yt-llm-service
+cd ~/Desktop/yt-llm-service
 docker-compose up -d
 # Runs production service on port 8002
 ```
 
 #### Feature Worktree
 ```bash
-cd /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction
+cd ~/Desktop/yt-llm-service-worktrees/code-extraction
 
 # Optionally modify docker-compose.yml port to avoid conflicts
 # Change port 8002 to 8003 if running both simultaneously
@@ -91,7 +91,7 @@ docker-compose up -d
 If you need changes from master in your feature branch:
 
 ```bash
-cd /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction
+cd ~/Desktop/yt-llm-service-worktrees/code-extraction
 git fetch origin
 git merge origin/master
 # Resolve any conflicts
@@ -104,13 +104,13 @@ When Code Extraction Suite is production-ready:
 
 ```bash
 # 1. Ensure feature branch is up to date
-cd /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction
+cd ~/Desktop/yt-llm-service-worktrees/code-extraction
 git fetch origin
 git merge origin/master
 git push origin feature/code-extraction
 
 # 2. Switch to master worktree
-cd /home/amlucas/Desktop/yt-llm-service
+cd ~/Desktop/yt-llm-service
 
 # 3. Create merge commit or pull request
 git merge feature/code-extraction
@@ -127,7 +127,7 @@ Once feature is merged and no longer needed:
 
 ```bash
 # 1. Remove worktree
-git worktree remove /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction
+git worktree remove ~/Desktop/yt-llm-service-worktrees/code-extraction
 
 # 2. Delete local branch
 git branch -d feature/code-extraction
@@ -139,7 +139,7 @@ git push origin --delete feature/code-extraction
 ## Current Project Structure
 
 ```
-/home/amlucas/Desktop/
+~/Desktop/
 ├── yt-llm-service/                      # Master worktree (production)
 │   ├── src/
 │   │   ├── run_llm_api.py
@@ -205,7 +205,7 @@ git push origin --delete feature/code-extraction
 git worktree list
 
 # Re-add if accidentally removed
-git worktree add /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction feature/code-extraction
+git worktree add ~/Desktop/yt-llm-service-worktrees/code-extraction feature/code-extraction
 ```
 
 ### Conflicting Docker Ports
@@ -232,6 +232,6 @@ git merge origin/master
 ## Questions?
 
 For questions about this workflow or the Code Extraction Suite:
-- Check feature branch README: `/home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction/README.md`
-- Review Code Extraction docs: `/home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction/docs/CODE_EXTRACTION.md`
+- Check feature branch README: `~/Desktop/yt-llm-service-worktrees/code-extraction/README.md`
+- Review Code Extraction docs: `~/Desktop/yt-llm-service-worktrees/code-extraction/docs/CODE_EXTRACTION.md`
 - Open an issue on GitHub

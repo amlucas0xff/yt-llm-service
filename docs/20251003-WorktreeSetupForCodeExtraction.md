@@ -13,13 +13,13 @@ Separate beta Code Extraction Suite from production-ready code to prevent accide
 ### Created Worktrees
 
 1. **Master Worktree** (Production)
-   - Location: `/home/amlucas/Desktop/yt-llm-service`
+   - Location: `~/Desktop/yt-llm-service`
    - Branch: `master`
    - Commit: `ea11ea4`
    - Status: Clean, production-ready only
 
 2. **Feature Worktree** (Code Extraction Beta)
-   - Location: `/home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction`
+   - Location: `~/Desktop/yt-llm-service-worktrees/code-extraction`
    - Branch: `feature/code-extraction`
    - Commit: `0be49a1`
    - Status: Contains complete Code Extraction Suite
@@ -75,12 +75,12 @@ Separate beta Code Extraction Suite from production-ready code to prevent accide
 
 ### Switch to Production
 ```bash
-cd /home/amlucas/Desktop/yt-llm-service
+cd ~/Desktop/yt-llm-service
 ```
 
 ### Switch to Code Extraction Development
 ```bash
-cd /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction
+cd ~/Desktop/yt-llm-service-worktrees/code-extraction
 ```
 
 ### List Worktrees
@@ -109,7 +109,7 @@ git worktree list
 git branch feature/code-extraction
 
 # Create worktree
-git worktree add /home/amlucas/Desktop/yt-llm-service-worktrees/code-extraction feature/code-extraction
+git worktree add ~/Desktop/yt-llm-service-worktrees/code-extraction feature/code-extraction
 
 # Cleanup master
 git checkout HEAD -- README.md docker-compose.yml requirements.txt
