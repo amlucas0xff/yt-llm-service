@@ -38,12 +38,13 @@ A high-performance FastAPI service for YouTube audio transcription with advanced
 
 ### Prerequisites
 
-- Python 3.11 or higher
-- NVIDIA GPU with CUDA support (recommended)
-- Docker and docker-compose (optional)
-- HuggingFace account for model access
+- Docker and docker-compose
+- NVIDIA GPU with CUDA support (recommended, or use CPU mode)
+- HuggingFace account (free) - get token from https://huggingface.co/settings/tokens
 
-### Installation
+### Installation (Docker - Recommended)
+
+**Why Docker?** This project has complex dependencies (WhisperX, PyTorch, CUDA, ffmpeg, yt-dlp). Docker handles everything automatically.
 
 1. **Clone the repository**
 ```bash
@@ -51,50 +52,39 @@ git clone https://github.com/amlucas0xff/yt-llm-service.git
 cd yt-llm-service
 ```
 
-2. **Set up environment**
+2. **Configure environment**
 ```bash
 # Copy environment template
 cp .env.example .env
 
-# Edit .env with your configuration
-# Set HF_TOKEN from https://huggingface.co/settings/tokens
+# Edit .env and set your HuggingFace token
+nano .env  # or vim, code, etc.
+# Set: HF_TOKEN=your_token_here
 ```
 
-3. **Install dependencies**
-```bash
-# Using uv (recommended)
-uv venv
-source .venv/bin/activate
-uv pip install -r requirements.txt
-
-# Or using pip
-pip install -r requirements.txt
-```
-
-4. **Run the service**
-```bash
-# Development
-uvicorn src.run_llm_api:app --host 0.0.0.0 --port 8002 --reload
-
-# Production
-python src/run_llm_api.py
-```
-
-### Docker Deployment
-
-1. **Prepare configuration**
-```bash
-cp docker-compose.example.yml docker-compose.yml
-cp .env.example .env
-# Edit both files as needed
-```
-
-2. **Build and run**
+3. **Start the service**
 ```bash
 docker-compose up --build
 ```
 
 The service will be available at `http://localhost:8002`
+
+**First run:** Docker will download ML models (~2-3GB). This may take several minutes.
+
+### Quick Test
+
+```bash
+# Check service health
+curl http://localhost:8002/health
+
+# Transcribe a YouTube video
+curl -X POST "http://localhost:8002/transcribe-youtube-llm" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "output_format": "simple"
+  }'
+```
 
 ## 📋 API Documentation
 
@@ -193,66 +183,47 @@ BATCH_SIZE=4
 
 ```
 yt-llm-service/
-├── src/
-│   ├── run_llm_api.py      # FastAPI application
-│   ├── transcription_service.py  # Core transcription logic
-│   ├── audio_downloader.py       # YouTube/file processing
-│   ├── storage_service.py        # Persistent storage
-│   └── config.py                 # Configuration management
-├── data/
-│   ├── output/            # Transcription results
-│   ├── tmp/              # Temporary processing files
-│   └── logs/             # Application logs
-├── tests/
-│   └── test_storage.py   # Storage functionality tests
-├── docker-compose.yml    # Docker configuration
-├── Dockerfile           # Container definition
-├── requirements.txt     # Python dependencies
-└── README.md           # This file
+├── src/                    # Core application code
+│   ├── run_llm_api.py           # FastAPI service
+│   ├── transcription_service.py # Transcription engine
+│   ├── audio_downloader.py      # YouTube/file processing
+│   ├── storage_service.py       # Result persistence
+│   └── config.py                # Configuration
+├── data/                   # Runtime data (gitignored)
+│   ├── output/                  # Saved transcriptions
+│   ├── tmp/                     # Temporary files
+│   └── logs/                    # Application logs
+├── docs/                   # Documentation
+│   └── images/                  # Diagrams and visuals
+├── docker-compose.yml      # Docker orchestration
+├── Dockerfile              # Container image
+├── requirements.txt        # Python dependencies
+├── .env.example            # Environment template
+└── README.md               # This file
 ```
 
-## 🧪 Testing
+## 🐳 GPU Support (Optional)
 
-### Run Tests
+If you have an NVIDIA GPU and want GPU acceleration:
+
+1. **Install NVIDIA Container Toolkit**
 ```bash
-# Storage functionality
-python test_storage.py
-
-# API endpoints
-python test_llm_endpoints.py
-
-# Full test suite
-pytest tests/
-```
-
-### Example Test Usage
-```bash
-# Test YouTube transcription
-curl -X POST "http://localhost:8002/transcribe-youtube-llm" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    "output_format": "simple"
-  }'
-```
-
-## 🐳 Docker Configuration
-
-### Requirements
-- Docker Engine 20.10+
-- docker-compose v2.0+
-- NVIDIA Container Toolkit (for GPU support)
-
-### GPU Setup
-```bash
-# Install NVIDIA Container Toolkit
+# Ubuntu/Debian
 distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
 curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | \
+  sudo tee /etc/apt/sources.list.d/nvidia-docker.list
 
 sudo apt-get update && sudo apt-get install -y nvidia-docker2
 sudo systemctl restart docker
 ```
+
+2. **Verify GPU access**
+```bash
+docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi
+```
+
+**CPU-only mode:** If you don't have a GPU, edit `.env` and set `DEVICE=cpu`. Processing will be slower but functional.
 
 ## 📊 Performance Benchmarks
 
