@@ -43,7 +43,7 @@ A high-performance FastAPI service for YouTube audio transcription with advanced
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/amlucas/yt-llm-service.git
+git clone https://github.com/amlucas0xff/yt-llm-service.git
 cd yt-llm-service
 ```
 
@@ -283,7 +283,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 📞 Support
 
 For issues and questions:
-- Open an [issue](https://github.com/amlucas/yt-llm-service/issues)
+- Open an [issue](https://github.com/amlucas0xff/yt-llm-service/issues)
 - Check existing [documentation](http://localhost:8002/docs)
 - Review [configuration examples](.env.example)
 
