@@ -30,6 +30,7 @@ data/logs/*
 # Docker
 *.log
 .docker/
+logs/
 
 # Security & Authentication
 cookies.txt
@@ -43,7 +44,6 @@ cookies.txt
 Thumbs.db
 
 # Legacy files (old tests, docs, samples)
-legacy/
 
 # Additional cleanup
 *.pyc
