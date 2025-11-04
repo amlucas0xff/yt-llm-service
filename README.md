@@ -32,6 +32,10 @@ A high-performance FastAPI service for YouTube audio transcription with advanced
 
 ## 🚀 Quick Start
 
+### How It Works
+
+![Service Workflow](docs/images/diagram-10d59e49.png)
+
 ### Prerequisites
 
 - Python 3.11 or higher
@@ -279,13 +283,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [pyannote.audio](https://github.com/pyannote/pyannote-audio) for speaker diarization
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) for YouTube processing
 - [FastAPI](https://fastapi.tiangolo.com/) for the web framework
-
-## 📞 Support
-
-For issues and questions:
-- Open an [issue](https://github.com/amlucas0xff/yt-llm-service/issues)
-- Check existing [documentation](http://localhost:8002/docs)
-- Review [configuration examples](.env.example)
 
 ---
 
