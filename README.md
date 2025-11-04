@@ -34,7 +34,7 @@ A high-performance FastAPI service for YouTube audio transcription with advanced
 
 ### How It Works
 
-![Service Workflow](docs/images/diagram-10d59e49.png)
+![Service Workflow](docs/images/workflow-diagram.svg)
 
 ### Prerequisites
 
