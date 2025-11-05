@@ -2,6 +2,9 @@
 
 A high-performance FastAPI service for YouTube audio transcription with advanced speaker diarization and LLM-optimized output formatting. Built with WhisperX for state-of-the-art accuracy and CUDA support for scalable processing.
 
+> **⚠️ IMPORTANT: GPU/CUDA REQUIRED**
+> This application is designed and tested for NVIDIA GPU with CUDA support. While CPU mode is available as a fallback option, it is **10-20x slower** and **not recommended for production use**. For optimal performance, an NVIDIA GPU with CUDA support is strongly recommended.
+
 ## ✨ Features
 
 ### Core Capabilities
@@ -39,8 +42,12 @@ A high-performance FastAPI service for YouTube audio transcription with advanced
 ### Prerequisites
 
 - Docker and docker-compose
-- NVIDIA GPU with CUDA support (recommended, or use CPU mode)
+- **NVIDIA GPU with CUDA support (REQUIRED for optimal performance)**
+  - RTX 3000 series or newer recommended
+  - Minimum 8GB VRAM for large-v3-turbo model
+  - NVIDIA Container Toolkit for Docker GPU access
 - HuggingFace account (free) - get token from https://huggingface.co/settings/tokens
+- CPU-only mode available but **NOT recommended** (10-20x slower)
 
 ### Installation (Docker - Recommended)
 
@@ -163,17 +170,27 @@ See `.env.example` for complete configuration options.
 
 ### Performance Tuning
 
-#### GPU Memory Optimization
+#### GPU Memory Optimization (Recommended)
 ```bash
-# For 8GB GPU
+# For 8GB GPU (RTX 3060, RTX 3070)
+DEVICE=cuda
 BATCH_SIZE=8
 COMPUTE_TYPE=float16
 
-# For 24GB GPU
-BATCH_SIZE=32
+# For 12-16GB GPU (RTX 3080, RTX 3090)
+DEVICE=cuda
+BATCH_SIZE=16
 COMPUTE_TYPE=float16
 
-# CPU-only (slower)
+# For 24GB+ GPU (RTX 4090, A5000)
+DEVICE=cuda
+BATCH_SIZE=32
+COMPUTE_TYPE=float16
+```
+
+#### CPU Fallback (Not Recommended for Production)
+```bash
+# CPU-only mode (10-20x slower, use only if no GPU available)
 DEVICE=cpu
 COMPUTE_TYPE=float32
 BATCH_SIZE=4
@@ -202,11 +219,11 @@ yt-llm-service/
 └── README.md               # This file
 ```
 
-## 🐳 GPU Support (Optional)
+## 🐳 GPU Support (Required for Production)
 
-If you have an NVIDIA GPU and want GPU acceleration:
+**This application is designed for GPU acceleration. CPU mode is available but not recommended.**
 
-1. **Install NVIDIA Container Toolkit**
+1. **Install NVIDIA Container Toolkit** (Required for GPU access)
 ```bash
 # Ubuntu/Debian
 distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
@@ -223,7 +240,19 @@ sudo systemctl restart docker
 docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi
 ```
 
-**CPU-only mode:** If you don't have a GPU, edit `.env` and set `DEVICE=cpu`. Processing will be slower but functional.
+### CPU-Only Fallback (Not Recommended)
+
+**⚠️ WARNING: CPU mode is 10-20x slower than GPU mode.**
+
+If you don't have an NVIDIA GPU, you can use CPU mode as a fallback:
+1. Edit `.env` and set:
+   ```
+   DEVICE=cpu
+   COMPUTE_TYPE=float32
+   BATCH_SIZE=4
+   ```
+2. Note: Processing will be significantly slower and not suitable for production workloads.
+3. Consider using a cloud GPU instance for better performance.
 
 ## 📊 Performance Benchmarks
 
