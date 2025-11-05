@@ -41,7 +41,7 @@ RUN useradd --create-home --shell /bin/bash app
 WORKDIR /app
 
 # Create necessary directories with proper permissions
-RUN mkdir -p /app/output /app/tmp /app/logs /home/app/.config/google-chrome /home/app/.mozilla/firefox /home/app/.config/matplotlib \
+RUN mkdir -p /app/output /app/tmp /app/logs /home/app/.config/matplotlib \
     && chown -R app:app /app /home/app/.config
 
 # Stage 2: Python dependencies
@@ -54,21 +54,11 @@ COPY requirements.txt .
 RUN pip3 install --upgrade pip setuptools wheel \
     && pip3 install --no-cache-dir -r requirements.txt
 
-# Install yt-dlp wrapper for automatic Firefox cookie authentication
-COPY yt-dlp-wrapper.sh /tmp/yt-dlp-wrapper.sh
-RUN mv /usr/local/bin/yt-dlp /usr/local/bin/yt-dlp-original \
-    && cp /tmp/yt-dlp-wrapper.sh /usr/local/bin/yt-dlp \
-    && chmod +x /usr/local/bin/yt-dlp \
-    && rm /tmp/yt-dlp-wrapper.sh
-
 # Stage 3: Application
 FROM dependencies AS application
 
 # Copy application code and entrypoint script
 COPY --chown=app:app . .
-
-# Copy cookies file if it exists (for YouTube authentication)
-COPY --chown=app:app cookies.txt /app/cookies.txt
 
 # Make entrypoint script executable
 RUN chmod +x /app/entrypoint.sh
@@ -83,10 +73,7 @@ ENV DEVICE=cuda \
     BATCH_SIZE=16 \
     TEMP_DIR=/app/tmp \
     OUTPUT_DIR=/app/output \
-    MAX_FILE_AGE_HOURS=24 \
     LOG_LEVEL=INFO \
-    MCP_HOST=0.0.0.0 \
-    MCP_PORT=8001 \
     TF_CPP_MIN_LOG_LEVEL=2 \
     CUDA_VISIBLE_DEVICES=0 \
     TF_FORCE_GPU_ALLOW_GROWTH=true \
