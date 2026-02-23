@@ -1,3 +1,10 @@
+# /// script
+# dependencies = [
+#   "typer>=0.12.0",
+#   "rich>=13.0.0",
+#   "httpx>=0.25.0",
+# ]
+# ///
 """
 CLI for yt-llm-service — transcribe YouTube URLs or local files.
 
