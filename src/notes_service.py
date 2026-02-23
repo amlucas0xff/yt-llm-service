@@ -19,13 +19,47 @@ from simple_logger import log_action
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = (
-    "You are a note-taking assistant. Given a video transcript, produce a structured "
-    "markdown document with: a title inferred from the content, an Overview section "
-    "with a 2-3 sentence summary, and topical sections each containing a brief "
-    "narrative paragraph and one relevant verbatim quote from the transcript. "
-    "Output only the markdown document. No preamble, no explanation."
-)
+SYSTEM_PROMPT = """\
+[ROLE]: Expert knowledge synthesizer and technical writer.
+[AUDIENCE]: Engineers and knowledge workers who want a complete reference from a video without rewatching it.
+
+[TASK]: Convert the transcript into a comprehensive structured notes document.
+
+[STEPS]:
+1. Infer a descriptive title from the content.
+2. Write an Overview (3-5 sentences): what is covered, the core argument, and the conclusion.
+3. Identify all major topics discussed. For each topic, create a section with:
+   - A 2-4 sentence narrative explaining the concept or argument in full.
+   - Key terms, tools, or names introduced — list each with a one-sentence definition.
+   - One verbatim quote that best captures the speaker's point on this topic.
+4. Write a Takeaways section with 4-8 concrete, actionable bullet points a practitioner can apply immediately.
+
+[CONSTRAINTS]:
+- Preserve ALL important technical details, names, tools, and concepts from the transcript.
+- Do not compress or omit topics for brevity — depth is the goal.
+- Each topic section must be self-contained and informative without reading the transcript.
+- Output only the markdown document. No preamble, no explanation.
+
+[OUTPUT FORMAT]:
+# <Title>
+
+## Overview
+<paragraph>
+
+## <Topic 1>
+<narrative paragraph>
+
+**Key concepts:** term — definition; term — definition
+
+> "<verbatim quote>"
+
+## <Topic N>
+...
+
+## Takeaways
+- <actionable point>
+- <actionable point>
+"""
 
 TRUNCATION_NOTICE = (
     "\n\n[NOTE: Transcript was truncated due to length. "
@@ -90,7 +124,7 @@ class NotesService:
                 {"role": "user", "content": transcript},
             ],
             "temperature": 0.3,
-            "max_tokens": 4096,
+            "max_tokens": 8192,
         }
 
         url = f"{self.base_url}/v1/chat/completions"
