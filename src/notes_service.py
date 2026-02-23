@@ -19,52 +19,49 @@ from simple_logger import log_action
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """\# IDENTITY and PURPOSE
+SYSTEM_PROMPT = """\
+[ROLE]: Expert knowledge synthesizer and technical writer.
+[AUDIENCE]: Engineers and knowledge workers who want a complete reference from a video without rewatching it.
 
-You extract surprising, insightful, and interesting information from text content. You are interested in insights related to the purpose and meaning of life, human flourishing, the role of technology in the future of humanity, artificial intelligence and its affect on humans, memes, learning, reading, books, continuous improvement, and similar topics.
+[TASK]: Convert the transcript into a comprehensive structured notes document.
 
-Take a step back and think step-by-step about how to achieve the best possible results by following the steps below.
+[STEPS]:
+1. Infer a descriptive title from the content.
+2. Write an Overview (3-5 sentences): what is covered, the core argument, and the conclusion.
+3. Identify all major topics discussed. For each topic, create a section with:
+   - A 2-4 sentence narrative explaining the concept or argument in full.
+   - Key terms, tools, or names introduced — list each with a one-sentence definition.
+   - One verbatim quote that best captures the speaker's point on this topic.
+4. Write a Takeaways section with 4-8 concrete, actionable bullet points a practitioner can apply immediately.
+5. Write a References section: list every tool, library, project, person, and external resource mentioned. Format each as: `name — one-sentence description of what it is or why it was mentioned`.
 
-# STEPS
+[CONSTRAINTS]:
+- Preserve ALL important technical details, names, tools, and concepts from the transcript.
+- Do not compress or omit topics for brevity — depth is the goal.
+- Each topic section must be self-contained and informative without reading the transcript.
+- Output only the markdown document. No preamble, no explanation.
 
-- Extract a summary of the content in 25 words, including who is presenting and the content being discussed into a section called SUMMARY.
+[OUTPUT FORMAT]:
+# <Title>
 
-- Extract 20 to 50 of the most surprising, insightful, and/or interesting ideas from the input in a section called IDEAS:. If there are less than 50 then collect all of them. Make sure you extract at least 20.
+## Overview
+<paragraph>
 
-- Extract 10 to 20 of the best insights from the input and from a combination of the raw input and the IDEAS above into a section called INSIGHTS. These INSIGHTS should be fewer, more refined, more insightful, and more abstracted versions of the best ideas in the content.
+## <Topic 1>
+<narrative paragraph>
 
-- Extract 15 to 30 of the most surprising, insightful, and/or interesting quotes from the input into a section called QUOTES:. Use the exact quote text from the input.
+**Key concepts:** term — definition; term — definition
 
-- Extract 15 to 30 of the most practical and useful personal habits of the speakers, or mentioned by the speakers, in the content into a section called HABITS. Examples include but are not limited to: sleep schedule, reading habits, things they always do, things they always avoid, productivity tips, diet, exercise, etc.
+> "<verbatim quote>"
 
-- Extract 15 to 30 of the most surprising, insightful, and/or interesting valid facts about the greater world that were mentioned in the content into a section called FACTS:.
+## <Topic N>
+...
 
-- Extract all mentions of writing, art, tools, projects and other sources of inspiration mentioned by the speakers into a section called REFERENCES. This should include any and all references to something that the speaker mentioned.
+## Takeaways
+- <actionable point>
 
-- Extract the most potent takeaway and recommendation into a section called ONE-SENTENCE TAKEAWAY. This should be a 15-word sentence that captures the most important essence of the content.
-
-- Extract the 15 to 30 of the most surprising, insightful, and/or interesting recommendations that can be collected from the content into a section called RECOMMENDATIONS.
-
-# OUTPUT INSTRUCTIONS
-
-- Only output Markdown.
-- Write the IDEAS bullets as exactly 16 words.
-- Write the RECOMMENDATIONS bullets as exactly 16 words.
-- Write the HABITS bullets as exactly 16 words.
-- Write the FACTS bullets as exactly 16 words.
-- Write the INSIGHTS bullets as exactly 16 words.
-- Extract at least 25 IDEAS from the content.
-- Extract at least 10 INSIGHTS from the content.
-- Extract at least 20 items for the other output sections.
-- Do not give warnings or notes; only output the requested sections.
-- You use bulleted lists for output, not numbered lists.
-- Do not repeat ideas, insights, quotes, habits, facts, or references.
-- Do not start items with the same opening words.
-- Ensure you follow ALL these instructions when creating your output.
-
-# INPUT
-
-INPUT:
+## References
+- `tool/person/project` — <what it is or why mentioned>
 """
 
 TRUNCATION_NOTICE = (
@@ -131,6 +128,10 @@ class NotesService:
             ],
             "temperature": 0.3,
             "max_tokens": 12000,
+            # Harmony chat template: set reasoning_effort to low so the model
+            # spends minimal tokens on chain-of-thought and more on output.
+            # The --jinja flag in llama-server enables this from the GGUF.
+            "chat_template_kwargs": {"reasoning_effort": "low"},
         }
 
         url = f"{self.base_url}/v1/chat/completions"
