@@ -260,3 +260,40 @@ class StorageService:
             transcription_files.append(str(file_path))
 
         return sorted(transcription_files)
+
+    def save_notes(self, media_filename: str, notes_text: str) -> str:
+        """
+        Save generated notes to disk alongside the transcription.
+
+        Always writes to notes.md (overwrites if re-generated). Unlike
+        transcription files which are versioned (transcription_1.md etc.),
+        notes represent the latest generation and overwriting is intentional.
+
+        Args:
+            media_filename: Original media filename (same key as save_transcription)
+            notes_text: Markdown notes content from NotesService
+
+        Returns:
+            Absolute path to saved notes file
+
+        Raises:
+            OSError: If file operations fail
+        """
+        try:
+            directory = self.get_directory_path(media_filename)
+            directory.mkdir(parents=True, exist_ok=True)
+
+            file_path = directory / "notes.md"
+
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            content = f"<!-- Generated: {timestamp} -->\n\n{notes_text}\n"
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            logger.info(f"Notes saved to: {file_path}")
+            return str(file_path)
+
+        except Exception as e:
+            logger.error(f"Failed to save notes for {media_filename}: {str(e)}")
+            raise OSError(f"Failed to save notes: {str(e)}")
