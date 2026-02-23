@@ -137,7 +137,7 @@ def render_output(data: dict, fmt: str) -> None:
 def transcribe(
     input: str = typer.Argument(..., help="YouTube URL or path to a local file"),
     format: OutputFormat = typer.Option(OutputFormat.structured, "--format", help="Output format"),
-    notes: bool = typer.Option(False, "--notes", help="Generate structured notes via LLM"),
+    notes: bool = typer.Option(True, "--notes/--no-notes", help="Generate structured notes via LLM (default: on)"),
     no_filler: bool = typer.Option(False, "--no-filler", help="Remove filler words (um, uh, like...)"),
     min_speakers: Optional[int] = typer.Option(None, "--min-speakers", help="Minimum number of speakers"),
     max_speakers: Optional[int] = typer.Option(None, "--max-speakers", help="Maximum number of speakers"),
