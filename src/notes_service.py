@@ -131,7 +131,7 @@ class NotesService:
             # Harmony chat template: set reasoning_effort to low so the model
             # spends minimal tokens on chain-of-thought and more on output.
             # The --jinja flag in llama-server enables this from the GGUF.
-            "chat_template_kwargs": {"reasoning_effort": "low"},
+            "chat_template_kwargs": {"reasoning_effort": "medium"},
         }
 
         url = f"{self.base_url}/v1/chat/completions"
