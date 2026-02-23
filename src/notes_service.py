@@ -124,7 +124,7 @@ class NotesService:
                 {"role": "user", "content": transcript},
             ],
             "temperature": 0.3,
-            "max_tokens": 8192,
+            "max_tokens": 16384,
         }
 
         url = f"{self.base_url}/v1/chat/completions"
