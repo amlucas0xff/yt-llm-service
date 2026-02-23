@@ -15,6 +15,7 @@ from config import Config
 from transcription_service import TranscriptionService
 from audio_downloader import AudioDownloader
 from simple_logger import log_action
+from notes_service import NotesService
 
 # Initialize configuration first
 config = Config()
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Initialize services
 transcription_service = TranscriptionService(config)
 audio_downloader = AudioDownloader(temp_dir=config.TEMP_DIR)
+notes_service = NotesService(config)
 
 # Create FastAPI app
 app = FastAPI(
@@ -93,6 +95,7 @@ class LLMTranscriptionRequest(BaseModel):
     remove_filler_words: bool = False
     merge_consecutive_speakers: bool = True
     verbose: bool = True
+    generate_notes: bool = False
 
 
 class YouTubeLLMTranscriptionRequest(BaseModel):
@@ -106,6 +109,7 @@ class YouTubeLLMTranscriptionRequest(BaseModel):
     remove_filler_words: bool = False
     merge_consecutive_speakers: bool = True
     verbose: bool = True
+    generate_notes: bool = False
 
 
 class LLMTranscriptionResponse(BaseModel):
@@ -118,6 +122,7 @@ class LLMTranscriptionResponse(BaseModel):
     language: Optional[str] = None
     metadata: dict
     error: Optional[str] = None
+    notes: Optional[str] = None
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -283,6 +288,27 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
                 logger.info(f"Transcription saved to: {saved_path}")
         except Exception as e:
             logger.warning(f"Failed to save transcription to disk: {str(e)}")
+
+        # Generate and save notes if requested (non-fatal: notes failure doesn't break transcription)
+        notes_text = None
+        if request.generate_notes:
+            try:
+                transcript_text = llm_result.get("text") or ""
+                if not transcript_text and "blocks" in llm_result:
+                    transcript_text = " ".join(
+                        b.get("text", "") for b in llm_result.get("blocks", [])
+                    )
+                notes_text = await notes_service.generate(transcript_text)
+                if notes_text and saved_path:
+                    notes_path = transcription_service.storage_service.save_notes(
+                        media_filename=request.audio_file_path,
+                        notes_text=notes_text,
+                    )
+                    logger.info(f"Notes saved to: {notes_path}")
+            except Exception as e:
+                logger.warning(f"Notes generation failed (non-fatal): {e}")
+
+        response_data["notes"] = notes_text
 
         return LLMTranscriptionResponse(**response_data)
 
@@ -451,6 +477,27 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
         except Exception as e:
             logger.warning(f"Failed to save transcription to disk: {str(e)}")
 
+        # Generate and save notes if requested
+        notes_text = None
+        if request.generate_notes:
+            try:
+                transcript_text = llm_result.get("text") or ""
+                if not transcript_text and "blocks" in llm_result:
+                    transcript_text = " ".join(
+                        b.get("text", "") for b in llm_result.get("blocks", [])
+                    )
+                notes_text = await notes_service.generate(transcript_text)
+                if notes_text and saved_path:
+                    notes_path = transcription_service.storage_service.save_notes(
+                        media_filename=storage_name,
+                        notes_text=notes_text,
+                    )
+                    logger.info(f"Notes saved to: {notes_path}")
+            except Exception as e:
+                logger.warning(f"Notes generation failed (non-fatal): {e}")
+
+        response_data["notes"] = notes_text
+
         return LLMTranscriptionResponse(**response_data)
 
     except ValueError as e:
@@ -554,6 +601,7 @@ async def transcribe_file_llm(
     remove_filler_words: bool = Form(False),
     merge_consecutive_speakers: bool = Form(True),
     verbose: bool = Form(True),
+    generate_notes: bool = Form(False),
 ):
     """
     Transcribe an uploaded video file and format for LLM consumption
@@ -655,6 +703,27 @@ async def transcribe_file_llm(
                 logger.info(f"Transcription saved to: {saved_path}")
         except Exception as e:
             logger.warning(f"Failed to save transcription to disk: {str(e)}")
+
+        # Generate and save notes if requested
+        notes_text = None
+        if generate_notes:
+            try:
+                transcript_text = llm_result.get("text") or ""
+                if not transcript_text and "blocks" in llm_result:
+                    transcript_text = " ".join(
+                        b.get("text", "") for b in llm_result.get("blocks", [])
+                    )
+                notes_text = await notes_service.generate(transcript_text)
+                if notes_text and saved_path:
+                    notes_path = transcription_service.storage_service.save_notes(
+                        media_filename=file.filename,
+                        notes_text=notes_text,
+                    )
+                    logger.info(f"Notes saved to: {notes_path}")
+            except Exception as e:
+                logger.warning(f"Notes generation failed (non-fatal): {e}")
+
+        response_data["notes"] = notes_text
 
         return response_data
 
@@ -809,7 +878,12 @@ async def root():
         "llm_endpoints": {
             "description": "Endpoints that format transcription data for LLM consumption",
             "formats": ["simple", "speaker", "structured", "markdown"],
-            "features": ["filler word removal", "speaker merging", "clean text output"]
+            "features": [
+                "filler word removal",
+                "speaker merging",
+                "clean text output",
+                "structured notes via generate_notes=true (requires llama-cpp sidecar)",
+            ]
         }
     }
 
