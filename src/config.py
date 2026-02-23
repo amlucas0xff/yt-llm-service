@@ -33,6 +33,12 @@ class Config:
         self.LLM_REMOVE_FILLER_WORDS = os.getenv("LLM_REMOVE_FILLER_WORDS", "false").lower() == "true"
         self.LLM_MERGE_CONSECUTIVE_SPEAKERS = os.getenv("LLM_MERGE_CONSECUTIVE_SPEAKERS", "true").lower() == "true"
 
+        # Notes service configuration
+        self.LLAMA_CPP_URL = os.getenv("LLAMA_CPP_URL", "http://llama-cpp:8080")
+        self.NOTES_MAX_TOKENS = int(os.getenv("NOTES_MAX_TOKENS", "80000"))
+        # LLAMA_CPP_GPU_LAYERS is consumed by docker-compose, stored here for logging only
+        self.LLAMA_CPP_GPU_LAYERS = int(os.getenv("LLAMA_CPP_GPU_LAYERS", "99"))
+
         # Validate LLM output format
         valid_formats = ["simple", "speaker", "structured", "markdown"]
         if self.LLM_OUTPUT_FORMAT not in valid_formats:
@@ -44,4 +50,4 @@ class Config:
     
     def __str__(self) -> str:
         """String representation hiding sensitive data"""
-        return f"Config(DEVICE={self.DEVICE}, WHISPER_MODEL={self.WHISPER_MODEL}, BATCH_SIZE={self.BATCH_SIZE}, LLM_OUTPUT_FORMAT={self.LLM_OUTPUT_FORMAT})"
+        return f"Config(DEVICE={self.DEVICE}, WHISPER_MODEL={self.WHISPER_MODEL}, BATCH_SIZE={self.BATCH_SIZE}, LLM_OUTPUT_FORMAT={self.LLM_OUTPUT_FORMAT}, LLAMA_CPP_URL={self.LLAMA_CPP_URL})"
