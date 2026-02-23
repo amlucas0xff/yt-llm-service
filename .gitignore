@@ -51,3 +51,9 @@ Thumbs.db
 .coverage
 htmlcov/
 *.egg-info/logs/
+
+# Downloaded ML models (large binary files, never commit)
+models/*.gguf
+models/*.bin
+models/*.safetensors
+models/*.ggml
