@@ -104,18 +104,27 @@ def build_file_fields(
     return fields
 
 
+def speakers_to_markdown(speakers: dict) -> str:
+    """Convert speakers dict {name: text} to a markdown string."""
+    lines = []
+    for speaker, text in speakers.items():
+        lines.append(f"**{speaker}:** {text}")
+    return "\n\n".join(lines)
+
+
 def render_output(data: dict, fmt: str) -> None:
     """Print transcription result to stdout."""
-    if fmt == "structured" and data.get("blocks"):
+    if data.get("blocks"):
         md_text = blocks_to_markdown(data["blocks"])
         console.print(Markdown(md_text))
-    elif fmt == "markdown" and data.get("text"):
-        console.print(Markdown(data["text"]))
     elif data.get("text"):
-        print(data["text"])
-    elif data.get("blocks"):
-        # Fallback: render blocks even for non-structured formats
-        print(blocks_to_markdown(data["blocks"]))
+        if fmt in ("structured", "markdown"):
+            console.print(Markdown(data["text"]))
+        else:
+            print(data["text"])
+    elif data.get("speakers"):
+        md_text = speakers_to_markdown(data["speakers"])
+        console.print(Markdown(md_text))
     else:
         err_console.print("[red]No transcription text in response.[/red]")
 
