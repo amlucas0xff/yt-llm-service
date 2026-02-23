@@ -59,6 +59,7 @@ services:
       - ./models:/models
     environment:
       - LLAMA_CPP_GPU_LAYERS=${LLAMA_CPP_GPU_LAYERS:-99}
+      - LLAMA_CPP_IDLE_SECONDS=${LLAMA_CPP_IDLE_SECONDS:-300}
       - HF_TOKEN=${HF_TOKEN:-}
       - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     deploy:
@@ -66,7 +67,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['0']
+              device_ids: ['1']
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
