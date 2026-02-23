@@ -298,6 +298,10 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
                     transcript_text = " ".join(
                         b.get("text", "") for b in llm_result.get("blocks", [])
                     )
+                if not transcript_text and "speakers" in llm_result:
+                    transcript_text = " ".join(
+                        text for text in llm_result.get("speakers", {}).values() if text
+                    )
                 notes_text = await notes_service.generate(transcript_text)
                 if notes_text and saved_path:
                     notes_path = transcription_service.storage_service.save_notes(
@@ -485,6 +489,10 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
                 if not transcript_text and "blocks" in llm_result:
                     transcript_text = " ".join(
                         b.get("text", "") for b in llm_result.get("blocks", [])
+                    )
+                if not transcript_text and "speakers" in llm_result:
+                    transcript_text = " ".join(
+                        text for text in llm_result.get("speakers", {}).values() if text
                     )
                 notes_text = await notes_service.generate(transcript_text)
                 if notes_text and saved_path:
@@ -712,6 +720,10 @@ async def transcribe_file_llm(
                 if not transcript_text and "blocks" in llm_result:
                     transcript_text = " ".join(
                         b.get("text", "") for b in llm_result.get("blocks", [])
+                    )
+                if not transcript_text and "speakers" in llm_result:
+                    transcript_text = " ".join(
+                        text for text in llm_result.get("speakers", {}).values() if text
                     )
                 notes_text = await notes_service.generate(transcript_text)
                 if notes_text and saved_path:

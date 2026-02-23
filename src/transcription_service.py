@@ -258,12 +258,12 @@ class TranscriptionService:
         # Process segments based on format
         if output_format == "simple":
             return self._format_simple(segments, language, remove_filler_words)
-        elif output_format == "speaker" or include_speakers:
-            return self._format_speaker_aware(segments, language, merge_consecutive_speakers, remove_filler_words)
         elif output_format == "structured":
             return self._format_structured(segments, language, merge_consecutive_speakers, remove_filler_words)
         elif output_format == "markdown":
             return self._format_markdown(segments, language, merge_consecutive_speakers, remove_filler_words)
+        elif output_format == "speaker" or include_speakers:
+            return self._format_speaker_aware(segments, language, merge_consecutive_speakers, remove_filler_words)
         else:
             return self._format_simple(segments, language, remove_filler_words)
 
