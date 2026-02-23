@@ -7,6 +7,9 @@ services:
     image: yt-llm-service:latest
     container_name: yt-llm-service
     restart: unless-stopped
+    depends_on:
+      llama-cpp:
+        condition: service_healthy
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -43,3 +46,31 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+  llama-cpp:
+    build: ./llama-cpp
+    container_name: llama-cpp
+    restart: unless-stopped
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./llama-cpp/entrypoint.sh:/entrypoint.sh:ro
+      - ./models:/models
+    environment:
+      - LLAMA_CPP_GPU_LAYERS=${LLAMA_CPP_GPU_LAYERS:-99}
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['0']
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 300s
+      retries: 10
