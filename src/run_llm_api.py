@@ -544,7 +544,10 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
         notes_text = None
         if request.generate_notes:
             try:
-                notes_text = await notes_service.generate(transcript_for_notes)
+                notes_text = await notes_service.generate(
+                    transcript_for_notes,
+                    video_context=video_ctx,
+                )
                 if notes_text and saved_path:
                     notes_path = transcription_service.storage_service.save_notes(
                         media_filename=storage_name,

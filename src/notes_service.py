@@ -68,20 +68,31 @@ SYSTEM_PROMPT = """\
 """
 
 CORRECTION_SYSTEM_PROMPT = """\
-You are correcting a speech-to-text transcript using a second ASR transcript of the same audio as a reference.
+[ROLE]: Transcript correction specialist.
+[TASK]: Fix speech-to-text errors in the primary transcript using the reference transcript and video metadata.
 
-Rules — read carefully:
-- Fix only words that are clearly misheard, phonetically substituted, or garbled.
-- Use the reference transcript to resolve ambiguous words — if one source has a plausible technical term and the other has a nonsense word, prefer the technical term.
-- Do NOT paraphrase, reorder, or restructure sentences.
-- Do NOT add content that does not appear in either source.
-- Do NOT remove content, including repetitions or filler words.
-- Preserve speaker intent exactly — including punctuation style and sentence structure.
-- The corrected transcript must be approximately the same length as the primary transcript.
-- If both sources have the same error, output what makes most sense in context.
-- Use the Video Context block (when present) to identify proper nouns, product
-  names, and domain-specific terms that must be preserved exactly as written.
-- Output only the corrected transcript. No preamble, no explanation.
+<ground_truth>
+The Video Context block is authoritative ground truth.
+- Title, channel, and tags contain correct spellings of all proper nouns in this video.
+- Correct any word that is a phonetic approximation of a term in the Video Context to match exactly.
+- This rule overrides all other rules. If both transcripts say "Entropic" but the title says "Anthropic", correct every instance to "Anthropic".
+</ground_truth>
+
+<correction_rules>
+1. Fix words that are clearly misheard, phonetically substituted, or garbled.
+2. Use the reference transcript to resolve ambiguous words — prefer the plausible technical term over a nonsense word.
+3. Preserve sentence structure, punctuation style, speaker intent, and filler words exactly.
+4. Output approximately the same length as the primary transcript.
+5. Add nothing that appears in neither source.
+</correction_rules>
+
+<self_check>
+Before outputting: scan the corrected transcript for any word phonetically resembling a proper noun from the Video Context. Correct any remaining mismatches.
+</self_check>
+
+<output_format>
+Corrected transcript only. No preamble, labels, or explanation.
+</output_format>
 """
 
 CHUNK_WORDS = 2000  # words per correction chunk
@@ -120,7 +131,11 @@ class NotesService:
         last_part = " ".join(words[-keep:])
         return first_part + TRUNCATION_NOTICE + last_part
 
-    async def generate(self, transcript_text: str) -> Optional[str]:
+    async def generate(
+        self,
+        transcript_text: str,
+        video_context: Optional["VideoContext"] = None,
+    ) -> Optional[str]:
         """
         Generate structured markdown notes from a transcript.
 
@@ -129,6 +144,9 @@ class NotesService:
 
         Args:
             transcript_text: Plain text transcript content.
+            video_context: Optional metadata for proper noun grounding. When provided,
+                           prepended to the user message as authoritative ground truth
+                           so the model corrects misspellings even after GEC.
 
         Returns:
             Markdown string with structured notes, or None if generation fails.
@@ -141,12 +159,22 @@ class NotesService:
 
         transcript = self._truncate_transcript(transcript_text)
 
+        if video_context:
+            user_content = (
+                self._build_context_block(video_context) + "\n\n"
+                "<transcript>\n"
+                + transcript
+                + "\n</transcript>"
+            )
+        else:
+            user_content = transcript
+
         payload = {
             # llama-server ignores the model field but it's required by the spec
             "model": "gpt-oss-20b",
             "messages": [
                 {"role": "developer", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": transcript},
+                {"role": "user", "content": user_content},
             ],
             "temperature": 0.3,
             "max_tokens": 12000,
@@ -194,18 +222,25 @@ class NotesService:
             return None
 
     def _build_context_block(self, video_context: "VideoContext") -> str:
-        """Format VideoContext as a context block for injection into correction prompts."""
+        """Format VideoContext as an authoritative grounding block for LLM prompts.
+
+        Positioned BEFORE transcript content so the model treats it as ground truth
+        rather than supplementary context. Uses XML tags per GPT-5.2 prompting guide
+        to signal authoritative scope to the model.
+        """
         tags_str = ", ".join(video_context.tags) if video_context.tags else ""
-        parts = ["## Video Context (use to resolve domain-specific terms):"]
+        lines = ["<video_context>"]
+        lines.append("Authoritative metadata — these spellings override both transcripts:")
         if video_context.title:
-            parts.append(f"Title: {video_context.title}")
+            lines.append(f"Title: {video_context.title}")
         if video_context.channel:
-            parts.append(f"Channel: {video_context.channel}")
+            lines.append(f"Channel: {video_context.channel}")
         if tags_str:
-            parts.append(f"Tags: {tags_str}")
+            lines.append(f"Tags: {tags_str}")
         if video_context.description:
-            parts.append(f"Description: {video_context.description}")
-        return "\n".join(parts)
+            lines.append(f"Description: {video_context.description}")
+        lines.append("</video_context>")
+        return "\n".join(lines)
 
     async def correct_transcript(
         self,
