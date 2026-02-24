@@ -52,6 +52,9 @@ Thumbs.db
 htmlcov/
 *.egg-info/logs/
 
+# Git worktrees
+.worktrees/
+
 # Downloaded ML models (large binary files, never commit)
 models/*.gguf
 models/*.bin
