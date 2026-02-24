@@ -105,6 +105,91 @@ class AudioDownloader:
             logger.warning(f"Failed to extract video title: {e}")
             return ""
 
+    def fetch_captions(self, youtube_url: str) -> Optional[str]:
+        """
+        Fetch YouTube's auto-generated English captions (en-orig) and return as plain text.
+
+        Uses yt-dlp Python API. Returns None if captions are unavailable or on any error.
+        Never raises.
+
+        IMPORTANT: Do NOT pass 'impersonate' to YoutubeDL() — the Python API in yt-dlp
+        2026.02.21 raises AssertionError on that option. Use cookies-only auth.
+        """
+        import tempfile
+
+        try:
+            import yt_dlp
+
+            ydl_opts = {
+                "quiet": True,
+                "no_warnings": True,
+                "skip_download": True,
+                "writeautomaticsub": True,
+                "subtitleslangs": ["en-orig", "en"],
+                "subtitlesformat": "vtt",
+                "outtmpl": "%(id)s.%(ext)s",
+                "noplaylist": True,
+            }
+            # Cookies-only auth — no impersonate (crashes Python API in this yt-dlp version)
+            cookie_path = Path("/app/cookies.txt")
+            if cookie_path.exists() and cookie_path.stat().st_size > 100:
+                ydl_opts["cookiefile"] = str(cookie_path)
+            # else: no auth — public videos work without auth for subtitle fetch
+
+            with tempfile.TemporaryDirectory() as tmpdir:
+                ydl_opts["paths"] = {"home": tmpdir}
+
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    info = ydl.extract_info(youtube_url, download=False)
+                    ydl.process_info(info)  # triggers subtitle download without audio
+
+                # Prefer en-orig; fall back to en. glob("*.vtt")[0] is nondeterministic
+                # when both tracks are downloaded — select explicitly.
+                tmppath = Path(tmpdir)
+                vtt_file = next(tmppath.glob("*.en-orig.vtt"), None) \
+                        or next(tmppath.glob("*.en.vtt"), None)
+
+                if vtt_file is None:
+                    logger.debug(f"No captions found for {youtube_url}")
+                    return None
+
+                vtt_text = vtt_file.read_text(encoding="utf-8")
+
+            return self._parse_vtt(vtt_text)
+
+        except Exception as e:
+            logger.debug(f"Caption fetch failed (non-fatal): {e}")
+            return None
+
+    def _parse_vtt(self, vtt_text: str) -> str:
+        """
+        Convert WebVTT content to plain deduplicated text.
+        Strips timestamps, inline timing tags, cue IDs, and duplicate consecutive lines.
+        """
+        lines = vtt_text.split("\n")
+        clean = []
+        for line in lines:
+            line = line.strip()
+            if (not line
+                    or line.startswith("WEBVTT")
+                    or line.startswith("Kind:")
+                    or line.startswith("Language:")):
+                continue
+            # skip timestamp lines (00:00:00.000 --> 00:00:01.000 ...)
+            if re.match(r"^\d{2}:\d{2}", line):
+                continue
+            # skip numeric-only cue IDs
+            if re.match(r"^\d+$", line):
+                continue
+            # strip inline timing tags like <00:00:01.200><c>
+            line = re.sub(r"<[^>]+>", "", line).strip()
+            if not line:
+                continue
+            # deduplicate consecutive identical lines (VTT repeats lines as captions scroll)
+            if not clean or clean[-1] != line:
+                clean.append(line)
+        return " ".join(clean)
+
     def download_audio(self, youtube_url: str, verbose: bool = True) -> Dict[str, Any]:
         """
         Download audio from YouTube URL
