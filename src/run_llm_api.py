@@ -16,6 +16,8 @@ from transcription_service import TranscriptionService
 from audio_downloader import AudioDownloader
 from simple_logger import log_action
 from notes_service import NotesService
+from user_config import load_user_config
+from obsidian_service import ObsidianService
 
 # Initialize configuration first
 config = Config()
@@ -31,6 +33,20 @@ logger = logging.getLogger(__name__)
 transcription_service = TranscriptionService(config)
 audio_downloader = AudioDownloader(temp_dir=config.TEMP_DIR)
 notes_service = NotesService(config)
+_user_cfg = load_user_config()
+obsidian_service: Optional[ObsidianService] = (
+    ObsidianService(
+        vault_path=_user_cfg.vault_path,
+        inbox_dir=_user_cfg.inbox_dir,
+        tags=_user_cfg.tags,
+    )
+    if _user_cfg and _user_cfg.obsidian_enabled
+    else None
+)
+if obsidian_service:
+    logger.info(f"Obsidian integration enabled → {_user_cfg.vault_path / _user_cfg.inbox_dir}")
+else:
+    logger.info("Obsidian integration disabled (no config or enabled=false)")
 
 # Create FastAPI app
 app = FastAPI(
@@ -309,6 +325,8 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
                         notes_text=notes_text,
                     )
                     logger.info(f"Notes saved to: {notes_path}")
+                    if obsidian_service:
+                        obsidian_service.save_note(notes_text, source_url=None)
             except Exception as e:
                 logger.warning(f"Notes generation failed (non-fatal): {e}")
 
@@ -501,6 +519,8 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
                         notes_text=notes_text,
                     )
                     logger.info(f"Notes saved to: {notes_path}")
+                    if obsidian_service:
+                        obsidian_service.save_note(notes_text, source_url=request.youtube_url)
             except Exception as e:
                 logger.warning(f"Notes generation failed (non-fatal): {e}")
 
@@ -732,6 +752,8 @@ async def transcribe_file_llm(
                         notes_text=notes_text,
                     )
                     logger.info(f"Notes saved to: {notes_path}")
+                    if obsidian_service:
+                        obsidian_service.save_note(notes_text, source_url=None)
             except Exception as e:
                 logger.warning(f"Notes generation failed (non-fatal): {e}")
 
