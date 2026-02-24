@@ -212,14 +212,14 @@ def test_save_note_has_yaml_frontmatter(tmp_path):
     assert f"date: {today}" in content
 
 
-def test_save_note_returns_none_on_missing_title(tmp_path):
+def test_save_note_falls_back_to_untitled_when_no_heading(tmp_path):
     from obsidian_service import ObsidianService
     svc = ObsidianService(vault_path=tmp_path, inbox_dir="Inbox")
-    # Notes with no # heading
+    # Notes with no # heading — should save with "Untitled.md" fallback
     result = svc.save_note("No heading here.\n", source_url="https://youtu.be/abc")
-    # Should still save with a fallback filename
     assert result is not None
     assert Path(result).exists()
+    assert Path(result).name == "Untitled.md"
 
 
 def test_save_note_sanitizes_title(tmp_path):
@@ -351,38 +351,32 @@ git commit -m "feat: add ObsidianService to write notes to vault inbox"
 **Files:**
 - Modify: `src/run_llm_api.py`
 
-The service is already structured with a startup event and a global `notes_service` instance. Follow the same pattern for `obsidian_service`.
+**IMPORTANT — actual structure:** There is no startup/lifespan hook in `run_llm_api.py`. Services are module-level globals initialized at import time (e.g. `notes_service = NotesService(config)` at line 33). Follow exactly the same pattern.
 
-**Step 1: Read the current startup block in run_llm_api.py**
+**Step 1: Add imports at the top of run_llm_api.py**
 
-Locate the `@app.on_event("startup")` or `lifespan` block and the global `notes_service` declaration — this is where to insert the Obsidian init.
-
-**Step 2: Add imports and global at the top of run_llm_api.py**
-
-Find the existing imports block and add:
+In the imports block alongside existing service imports, add:
 ```python
 from user_config import load_user_config
 from obsidian_service import ObsidianService
 ```
 
-Add a global alongside `notes_service`:
-```python
-obsidian_service: Optional[ObsidianService] = None
-```
+**Step 2: Add module-level global initialization**
 
-**Step 3: Initialize ObsidianService in the startup handler**
-
-Inside the startup function, after `notes_service` is initialized, add:
+Find the block where `notes_service = NotesService(config)` is declared (around line 33) and add immediately after it:
 ```python
-user_cfg = load_user_config()
-if user_cfg and user_cfg.obsidian_enabled:
-    global obsidian_service
-    obsidian_service = ObsidianService(
-        vault_path=user_cfg.vault_path,
-        inbox_dir=user_cfg.inbox_dir,
-        tags=user_cfg.tags,
+_user_cfg = load_user_config()
+obsidian_service: Optional[ObsidianService] = (
+    ObsidianService(
+        vault_path=_user_cfg.vault_path,
+        inbox_dir=_user_cfg.inbox_dir,
+        tags=_user_cfg.tags,
     )
-    logger.info(f"Obsidian integration enabled → {user_cfg.vault_path / user_cfg.inbox_dir}")
+    if _user_cfg and _user_cfg.obsidian_enabled
+    else None
+)
+if obsidian_service:
+    logger.info(f"Obsidian integration enabled → {_user_cfg.vault_path / _user_cfg.inbox_dir}")
 else:
     logger.info("Obsidian integration disabled (no config or enabled=false)")
 ```
