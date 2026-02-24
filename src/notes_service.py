@@ -10,9 +10,12 @@ the long HTTP call to llama-cpp (model generation can take 30-300 seconds).
 """
 
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 import httpx
+
+if TYPE_CHECKING:
+    from audio_downloader import VideoContext
 
 from config import Config
 from simple_logger import log_action
@@ -76,6 +79,8 @@ Rules — read carefully:
 - Preserve speaker intent exactly — including punctuation style and sentence structure.
 - The corrected transcript must be approximately the same length as the primary transcript.
 - If both sources have the same error, output what makes most sense in context.
+- Use the Video Context block (when present) to identify proper nouns, product
+  names, and domain-specific terms that must be preserved exactly as written.
 - Output only the corrected transcript. No preamble, no explanation.
 """
 
@@ -188,10 +193,25 @@ class NotesService:
             logger.error(f"Unexpected error calling llama-cpp: {e}")
             return None
 
+    def _build_context_block(self, video_context: "VideoContext") -> str:
+        """Format VideoContext as a context block for injection into correction prompts."""
+        tags_str = ", ".join(video_context.tags) if video_context.tags else ""
+        parts = ["## Video Context (use to resolve domain-specific terms):"]
+        if video_context.title:
+            parts.append(f"Title: {video_context.title}")
+        if video_context.channel:
+            parts.append(f"Channel: {video_context.channel}")
+        if tags_str:
+            parts.append(f"Tags: {tags_str}")
+        if video_context.description:
+            parts.append(f"Description: {video_context.description}")
+        return "\n".join(parts)
+
     async def correct_transcript(
         self,
         whisperx_text: str,
         yt_captions_text: str,
+        video_context: Optional["VideoContext"] = None,
     ) -> str:
         """
         Use gpt-oss-20b to correct the WhisperX transcript using YT captions as reference.
@@ -211,7 +231,7 @@ class NotesService:
 
         # Short transcript: single-pass correction
         if len(wx_words) <= CHUNK_WORDS:
-            return await self._correct_chunk(whisperx_text, yt_captions_text)
+            return await self._correct_chunk(whisperx_text, yt_captions_text, video_context)
 
         # Long transcript: chunk-level correction
         # Split WhisperX into chunks; use a proportional window of YT captions per chunk
@@ -228,16 +248,26 @@ class NotesService:
             yt_chunk = " ".join(yt_words[yt_start:yt_end])
             wx_chunk = " ".join(chunk)
 
-            corrected = await self._correct_chunk(wx_chunk, yt_chunk)
+            corrected = await self._correct_chunk(wx_chunk, yt_chunk, video_context)
             corrected_chunks.append(corrected)
 
         result = " ".join(corrected_chunks)
         logger.info(f"GEC chunked correction complete ({len(chunks)} chunks, {len(result)} chars)")
         return result
 
-    async def _correct_chunk(self, whisperx_chunk: str, yt_chunk: str) -> str:
+    async def _correct_chunk(
+        self,
+        whisperx_chunk: str,
+        yt_chunk: str,
+        video_context: Optional["VideoContext"] = None,
+    ) -> str:
         """Single-chunk correction call. Falls back to whisperx_chunk on error."""
+        context_block = (
+            self._build_context_block(video_context) + "\n\n"
+            if video_context else ""
+        )
         user_content = (
+            f"{context_block}"
             "## WhisperX transcript (primary — correct this):\n"
             f"{whisperx_chunk}\n\n"
             "## YouTube auto-captions (reference — use to resolve ambiguous words):\n"
