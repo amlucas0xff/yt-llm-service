@@ -64,6 +64,23 @@ SYSTEM_PROMPT = """\
 - `tool/person/project` — <what it is or why mentioned>
 """
 
+CORRECTION_SYSTEM_PROMPT = """\
+You are correcting a speech-to-text transcript using a second ASR transcript of the same audio as a reference.
+
+Rules — read carefully:
+- Fix only words that are clearly misheard, phonetically substituted, or garbled.
+- Use the reference transcript to resolve ambiguous words — if one source has a plausible technical term and the other has a nonsense word, prefer the technical term.
+- Do NOT paraphrase, reorder, or restructure sentences.
+- Do NOT add content that does not appear in either source.
+- Do NOT remove content, including repetitions or filler words.
+- Preserve speaker intent exactly — including punctuation style and sentence structure.
+- The corrected transcript must be approximately the same length as the primary transcript.
+- If both sources have the same error, output what makes most sense in context.
+- Output only the corrected transcript. No preamble, no explanation.
+"""
+
+CHUNK_WORDS = 2000  # words per correction chunk
+
 TRUNCATION_NOTICE = (
     "\n\n[NOTE: Transcript was truncated due to length. "
     "The middle portion has been omitted. Analysis covers the beginning and end.]\n\n"
@@ -170,3 +187,84 @@ class NotesService:
         except Exception as e:
             logger.error(f"Unexpected error calling llama-cpp: {e}")
             return None
+
+    async def correct_transcript(
+        self,
+        whisperx_text: str,
+        yt_captions_text: str,
+    ) -> str:
+        """
+        Use gpt-oss-20b to correct the WhisperX transcript using YT captions as reference.
+
+        For long transcripts, applies correction in ~2000-word chunks to avoid context
+        limits. Always returns full-length text — never truncates. Falls back to the
+        original whisperx_text on any error.
+        """
+        if not whisperx_text or not whisperx_text.strip():
+            return whisperx_text
+        if not yt_captions_text or not yt_captions_text.strip():
+            return whisperx_text
+
+        log_action("Running GEC transcript correction pass")
+
+        wx_words = whisperx_text.split()
+
+        # Short transcript: single-pass correction
+        if len(wx_words) <= CHUNK_WORDS:
+            return await self._correct_chunk(whisperx_text, yt_captions_text)
+
+        # Long transcript: chunk-level correction
+        # Split WhisperX into chunks; use a proportional window of YT captions per chunk
+        yt_words = yt_captions_text.split()
+        chunks = [wx_words[i:i + CHUNK_WORDS] for i in range(0, len(wx_words), CHUNK_WORDS)]
+        corrected_chunks = []
+
+        for i, chunk in enumerate(chunks):
+            # Align a proportional YT captions window to this chunk
+            frac_start = i / len(chunks)
+            frac_end = (i + 1) / len(chunks)
+            yt_start = int(frac_start * len(yt_words))
+            yt_end = int(frac_end * len(yt_words))
+            yt_chunk = " ".join(yt_words[yt_start:yt_end])
+            wx_chunk = " ".join(chunk)
+
+            corrected = await self._correct_chunk(wx_chunk, yt_chunk)
+            corrected_chunks.append(corrected)
+
+        result = " ".join(corrected_chunks)
+        logger.info(f"GEC chunked correction complete ({len(chunks)} chunks, {len(result)} chars)")
+        return result
+
+    async def _correct_chunk(self, whisperx_chunk: str, yt_chunk: str) -> str:
+        """Single-chunk correction call. Falls back to whisperx_chunk on error."""
+        user_content = (
+            "## WhisperX transcript (primary — correct this):\n"
+            f"{whisperx_chunk}\n\n"
+            "## YouTube auto-captions (reference — use to resolve ambiguous words):\n"
+            f"{yt_chunk}"
+        )
+        payload = {
+            "model": "gpt-oss-20b",
+            "messages": [
+                {"role": "developer", "content": CORRECTION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            "temperature": 0.1,
+            "max_tokens": 4000,
+            "chat_template_kwargs": {"reasoning_effort": "low"},
+        }
+        url = f"{self.base_url}/v1/chat/completions"
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                response = await client.post(url, json=payload)
+                response.raise_for_status()
+            content = (
+                response.json().get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+                .strip()
+            )
+            return content if content else whisperx_chunk
+        except Exception as e:
+            logger.warning(f"GEC chunk correction failed (non-fatal): {e}")
+            return whisperx_chunk
