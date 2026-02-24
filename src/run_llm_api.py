@@ -143,6 +143,7 @@ class LLMTranscriptionResponse(BaseModel):
     error: Optional[str] = None
     notes: Optional[str] = None
     corrected_transcript: Optional[str] = None
+    video_metadata: Optional[dict] = None
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -440,6 +441,7 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
         video_id = download_result["video_id"]
         video_title = download_result.get("title", "")
         file_size = download_result["file_size"]
+        video_ctx = download_result.get("video_context")
 
         logger.info(f"Audio downloaded successfully: {audio_path} ({file_size} bytes)")
 
@@ -490,32 +492,38 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
         if "blocks" in llm_result:
             response_data["blocks"] = llm_result["blocks"]
 
-        # --- GEC: fetch YT captions and correct transcript (non-fatal) ---
+        # --- GEC: use captions from video_ctx (fetched during download) ---
         corrected_transcript = None
-        if request.use_yt_captions:
+        if request.use_yt_captions and video_ctx and video_ctx.captions:
             try:
-                yt_captions = audio_downloader.fetch_captions(request.youtube_url)
-                if yt_captions:
-                    # Extract plain text from all possible format shapes
-                    raw_text = llm_result.get("text") or ""
-                    if not raw_text and "blocks" in llm_result:
-                        raw_text = " ".join(b.get("text", "") for b in llm_result["blocks"])
-                    if not raw_text and "speakers" in llm_result:
-                        raw_text = " ".join(
-                            t for t in llm_result["speakers"].values() if t
-                        )
-                    if raw_text:
-                        corrected_transcript = await notes_service.correct_transcript(
-                            whisperx_text=raw_text,
-                            yt_captions_text=yt_captions,
-                        )
-                        logger.info("GEC correction applied to transcript")
+                # Extract plain text from all possible format shapes
+                raw_text = llm_result.get("text") or ""
+                if not raw_text and "blocks" in llm_result:
+                    raw_text = " ".join(b.get("text", "") for b in llm_result["blocks"])
+                if not raw_text and "speakers" in llm_result:
+                    raw_text = " ".join(
+                        t for t in llm_result["speakers"].values() if t
+                    )
+                if raw_text:
+                    corrected_transcript = await notes_service.correct_transcript(
+                        whisperx_text=raw_text,
+                        yt_captions_text=video_ctx.captions,
+                        video_context=video_ctx,
+                    )
+                    logger.info("GEC correction applied to transcript")
             except Exception as e:
                 logger.warning(f"GEC pipeline failed (non-fatal): {e}")
 
         # Use corrected transcript downstream if available
         transcript_for_notes = corrected_transcript or llm_result.get("text") or ""
         response_data["corrected_transcript"] = corrected_transcript
+        response_data["video_metadata"] = {
+            "title": video_ctx.title,
+            "channel": video_ctx.channel,
+            "tags": video_ctx.tags,
+            "categories": video_ctx.categories,
+            "description": video_ctx.description,
+        } if video_ctx else None
 
         # Save transcription to disk
         saved_path = None
