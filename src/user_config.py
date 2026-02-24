@@ -11,7 +11,10 @@ Example:
     tags = ["video-notes", "auto-generated"]
 """
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:
+    import tomli as tomllib  # type: ignore[no-redef]  # Python 3.10 backport
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,16 +50,16 @@ def load_user_config(
     try:
         with open(config_path, "rb") as f:
             data = tomllib.load(f)
+        obsidian = data.get("obsidian", {})
+        vault_raw = obsidian.get("vault_path", "~/Documents/obsidian")
+        if not isinstance(vault_raw, str):
+            raise TypeError(f"vault_path must be a string, got {type(vault_raw).__name__}")
+        return UserConfig(
+            obsidian_enabled=obsidian.get("enabled", False),
+            vault_path=Path(vault_raw).expanduser(),
+            inbox_dir=obsidian.get("inbox_dir", "Inbox"),
+            tags=obsidian.get("tags", ["video-notes"]),
+        )
     except Exception as e:
-        logger.warning(f"Failed to parse user config at {config_path}: {e}")
+        logger.warning(f"Failed to load user config at {config_path}: {e}")
         return None
-
-    obsidian = data.get("obsidian", {})
-    vault_raw = obsidian.get("vault_path", "~/Documents/obsidian")
-
-    return UserConfig(
-        obsidian_enabled=obsidian.get("enabled", False),
-        vault_path=Path(vault_raw).expanduser(),
-        inbox_dir=obsidian.get("inbox_dir", "Inbox"),
-        tags=obsidian.get("tags", ["video-notes"]),
-    )

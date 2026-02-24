@@ -45,8 +45,10 @@ obsidian_service: Optional[ObsidianService] = (
 )
 if obsidian_service:
     logger.info(f"Obsidian integration enabled → {_user_cfg.vault_path / _user_cfg.inbox_dir}")
+elif _user_cfg is None:
+    logger.info("Obsidian integration disabled (config absent or unreadable — see warnings above)")
 else:
-    logger.info("Obsidian integration disabled (no config or enabled=false)")
+    logger.info("Obsidian integration disabled (enabled = false in config)")
 
 # Create FastAPI app
 app = FastAPI(
@@ -283,6 +285,7 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
             response_data["blocks"] = llm_result["blocks"]
 
         # Save transcription to disk
+        saved_path = None
         try:
             # Check if the audio file path is a YouTube URL and extract title for storage
             media_filename = request.audio_file_path
@@ -486,6 +489,7 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
             response_data["blocks"] = llm_result["blocks"]
 
         # Save transcription to disk
+        saved_path = None
         try:
             # Use video title for storage instead of URL, fallback to URL if no title
             storage_name = video_title if video_title.strip() else request.youtube_url
@@ -721,6 +725,7 @@ async def transcribe_file_llm(
             response_data["blocks"] = llm_result["blocks"]
 
         # Save transcription to disk
+        saved_path = None
         try:
             saved_path = transcription_service.save_transcription_to_disk(
                 media_filename=file.filename,
