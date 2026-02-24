@@ -18,6 +18,7 @@ A high-performance FastAPI service for YouTube audio transcription with advanced
 
 ### Advanced Features
 - **Structured Notes Generation**: Optional post-processing via local gpt-oss-20b (llama-cpp sidecar) — produces a markdown document with title, overview, and topical sections
+- **GEC Transcript Correction**: Dual-ASR error correction for YouTube URLs — fetches YouTube's own auto-captions (`en-orig`) in parallel and uses gpt-oss-20b to cross-reference both transcripts, fixing misheard words that neither ASR system can self-correct. Returns both the raw and corrected transcript. Opt-in via `use_yt_captions=true` (default).
 - **Filler Word Removal**: Intelligent removal of "um", "uh", and other speech disfluencies
 - **Speaker Merging**: Automatic merging of consecutive segments from the same speaker
 - **Batch Processing**: Configurable batch sizes for optimal performance
@@ -32,9 +33,38 @@ Two Docker services, GPU-isolated:
 | Service | Port | GPU | Model | Role |
 |---------|------|-----|-------|------|
 | `yt-llm-service` | 8002 | GPU 0 (RTX 4060, 8GB) | WhisperX large-v3-turbo | Transcription + speaker diarization |
-| `llama-cpp` | 8080 | GPU 1 (RTX 3090 Ti, 24GB) | gpt-oss-20b MXFP4 | Notes generation |
+| `llama-cpp` | 8080 | GPU 1 (RTX 3090 Ti, 24GB) | gpt-oss-20b MXFP4 | GEC correction + notes generation |
 
-`yt-llm-service` depends on `llama-cpp` (Docker healthcheck enforced). Notes generation is non-fatal — if llama-cpp is unavailable, transcription still succeeds and `notes` returns `null`.
+`yt-llm-service` depends on `llama-cpp` (Docker healthcheck enforced). Both GEC correction and notes generation are non-fatal — if llama-cpp is unavailable, transcription still succeeds and those fields return `null`.
+
+### YouTube URL Pipeline (3-stage)
+
+```
+YouTube URL
+    │
+    ├─── yt-dlp audio download ──────────────────────┐
+    │                                                  │
+    └─── yt-dlp caption fetch (en-orig VTT) ──────┐  │
+                                                   │  │
+                                              WhisperX transcription
+                                                   │  │
+                                          ┌────────┘  │
+                                          │  captions  │  WhisperX text
+                                          └────────────┴──────────────┐
+                                                                       │
+                                                          gpt-oss-20b GEC pass
+                                                     (corrects WhisperX using
+                                                      YT captions as reference)
+                                                                       │
+                                                        corrected_transcript
+                                                                       │
+                                                    ┌──────────────────┴──────────────────┐
+                                                    │                                      │
+                                             disk storage                    gpt-oss-20b notes
+                                          (transcription.txt)              (structured markdown)
+```
+
+File upload endpoints (`/transcribe-file-llm`) are unaffected — they skip the caption fetch stage and go directly WhisperX → notes.
 
 ## Tech Stack
 
@@ -97,7 +127,7 @@ The service will be available at `http://localhost:8002`
 # Check service health
 curl http://localhost:8002/health
 
-# Transcribe a YouTube video
+# Transcribe a YouTube video (GEC correction enabled by default)
 curl -X POST "http://localhost:8002/transcribe-youtube-llm" \
   -H "Content-Type: application/json" \
   -d '{
@@ -105,13 +135,23 @@ curl -X POST "http://localhost:8002/transcribe-youtube-llm" \
     "output_format": "simple"
   }'
 
-# Transcribe + generate structured notes
+# Transcribe + GEC correction + structured notes
 curl -X POST "http://localhost:8002/transcribe-youtube-llm" \
   -H "Content-Type: application/json" \
   -d '{
     "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
     "output_format": "simple",
-    "generate_notes": true
+    "generate_notes": true,
+    "use_yt_captions": true
+  }'
+
+# Skip GEC correction (faster, raw WhisperX only)
+curl -X POST "http://localhost:8002/transcribe-youtube-llm" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "youtube_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    "output_format": "simple",
+    "use_yt_captions": false
   }'
 ```
 
@@ -134,25 +174,29 @@ POST /transcribe-youtube-llm
 | `youtube_url` | string | required | YouTube URL |
 | `output_format` | string | `simple` | `simple`, `speaker`, `structured`, `markdown` |
 | `generate_notes` | bool | `false` | Generate structured notes via llama-cpp |
+| `use_yt_captions` | bool | `true` | Fetch YouTube captions and run GEC correction pass |
 | `remove_filler_words` | bool | `false` | Strip "um", "uh", etc. |
 | `merge_consecutive_speakers` | bool | `true` | Merge adjacent segments from same speaker |
 | `min_speakers` / `max_speakers` | int | `null` | Speaker count hints for diarization |
 
-**Example response with notes:**
+**Example response with GEC correction and notes:**
 ```json
 {
   "success": true,
-  "text": "Never gonna give you up, never gonna let you down...",
+  "text": "So entropy has released a list of really interesting updates...",
+  "corrected_transcript": "So Anthropic has released a list of really interesting updates...",
   "language": "en",
-  "notes": "# Never Gonna Give You Up\n\n## Overview\n...",
+  "notes": "# Anthropic Tool Calling Updates\n\n## Overview\n...",
   "metadata": {
-    "video_id": "dQw4w9WgXcQ",
-    "duration": 212,
+    "video_id": "3wglqgskzjQ",
+    "duration": 847,
     "speakers_detected": 1,
-    "word_count": 156
+    "word_count": 2341
   }
 }
 ```
+
+`corrected_transcript` contains the GEC-corrected version of the WhisperX output. Notes are generated from this corrected text when available. Set `use_yt_captions=false` to skip the correction pass and receive `"corrected_transcript": null`.
 
 Notes are also saved to `data/output/<title>/notes.md` alongside the transcription files.
 
