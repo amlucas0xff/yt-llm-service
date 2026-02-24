@@ -286,8 +286,9 @@ class AudioDownloader:
         video_id = self._extract_video_id(youtube_url)
         logger.info(f"Downloading audio for video: {video_id}")
 
-        # Extract video title using yt-dlp before downloading
-        video_title = self._extract_video_title(youtube_url)
+        # Fetch all metadata + captions in one call
+        ctx = self.get_video_context(youtube_url)
+        video_title = ctx.title
         logger.info(f"Video title: {video_title}")
 
         # Clean up any existing files for this video
@@ -362,6 +363,7 @@ class AudioDownloader:
             "title": video_title,
             "file_size": file_size,
             "temp_dir": str(self.temp_dir),
+            "video_context": ctx,
         }
 
     def _cleanup_old_files(self, video_id: str):

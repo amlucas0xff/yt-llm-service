@@ -44,3 +44,29 @@ def test_get_video_context_never_raises_on_error(tmp_path):
     assert isinstance(ctx, VideoContext)
     assert ctx.title == ""
     assert ctx.captions is None
+
+
+def test_download_audio_result_includes_video_context(tmp_path):
+    """download_audio() result dict must include 'video_context' key with VideoContext."""
+    dl = make_downloader(tmp_path)
+
+    # Create a fake mp3 so the file-exists check passes
+    fake_mp3 = tmp_path / "abc123.mp3"
+    fake_mp3.write_bytes(b"fake")
+
+    with patch.object(dl, "get_video_context") as mock_ctx, \
+         patch.object(dl, "_cleanup_old_files"), \
+         patch("subprocess.run") as mock_run:
+
+        mock_ctx.return_value = VideoContext(
+            video_id="abc123",
+            title="Test Video",
+            channel="TestChannel",
+        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        result = dl.download_audio("https://www.youtube.com/watch?v=abc123")
+
+    assert "video_context" in result
+    assert isinstance(result["video_context"], VideoContext)
+    assert result["title"] == "Test Video"
