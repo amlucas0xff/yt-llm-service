@@ -246,6 +246,27 @@ COMPUTE_TYPE=float32
 BATCH_SIZE=4
 ```
 
+## Obsidian Integration
+
+Generated notes can be automatically mirrored to your Obsidian vault.
+
+1. Copy the example config:
+   ```bash
+   mkdir -p ~/.config/yt-llm
+   cp config.example.toml ~/.config/yt-llm/config.toml
+   ```
+2. Edit `~/.config/yt-llm/config.toml`:
+   ```toml
+   [obsidian]
+   enabled = true
+   vault_path = "~/Documents/obsidian"   # path to your vault
+   inbox_dir = "Inbox"                    # subdirectory inside vault
+   tags = ["video-notes"]
+   ```
+3. Run `transcribe` as usual — if notes are generated, they are also saved to `{vault_path}/{inbox_dir}/{Title}.md` with YAML frontmatter (date, source URL, tags).
+
+The integration is silent: if the config file is absent or `enabled = false`, nothing changes.
+
 ## Project Structure
 
 ```

@@ -1,0 +1,10 @@
+# config.example.toml
+# User config for yt-llm-service.
+# Copy to ~/.config/yt-llm/config.toml and edit as needed.
+
+[obsidian]
+# Set enabled = true to mirror generated notes to your Obsidian vault.
+enabled = false
+vault_path = "~/Documents/obsidian"
+inbox_dir = "Inbox"
+tags = ["video-notes", "auto-generated"]
