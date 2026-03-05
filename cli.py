@@ -15,6 +15,7 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import sys
 import time
 from enum import Enum
@@ -133,6 +134,48 @@ def render_output(data: dict, fmt: str) -> None:
         console.print(Markdown(data["notes"]))
 
 
+def _stream_youtube(client: httpx.Client, base_url: str, payload: dict) -> dict:
+    """Consume SSE progress updates and return the final transcription payload."""
+    phase_label = "Starting transcription"
+
+    with err_console.status(f"[bold green]{phase_label}...[/bold green]") as status:
+        with client.stream("POST", f"{base_url}/transcribe-youtube-llm-stream", json=payload) as resp:
+            if resp.status_code != 200:
+                detail = resp.text
+                try:
+                    detail = resp.json().get("detail", detail)
+                except Exception:
+                    pass
+                err_console.print(f"[red]Service error {resp.status_code}: {detail}[/red]")
+                raise typer.Exit(code=1)
+
+            for line in resp.iter_lines():
+                if not line or not line.startswith("data: "):
+                    continue
+
+                try:
+                    event = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+
+                if event.get("phase") == "error":
+                    err_console.print(f"[red]{event.get('detail', 'Streaming request failed.')}[/red]")
+                    raise typer.Exit(code=1)
+
+                if event.get("phase") == "done":
+                    result = event.get("result")
+                    if not isinstance(result, dict):
+                        err_console.print("[red]Streaming response did not include a result payload.[/red]")
+                        raise typer.Exit(code=1)
+                    return result
+
+                phase_label = event.get("label") or event.get("phase") or phase_label
+                status.update(f"[bold green]{phase_label}...[/bold green]")
+
+    err_console.print("[red]Streaming response ended without a completion event.[/red]")
+    raise typer.Exit(code=1)
+
+
 @app.command()
 def transcribe(
     input: str = typer.Argument(..., help="YouTube URL or path to a local file"),
@@ -149,16 +192,15 @@ def transcribe(
     try:
         with httpx.Client(timeout=600) as client:
             if input_type == "youtube":
-                with err_console.status("[bold green]Transcribing YouTube video...[/bold green]"):
-                    payload = build_youtube_payload(
-                        url=input,
-                        fmt=format.value,
-                        notes=notes,
-                        no_filler=no_filler,
-                        min_speakers=min_speakers,
-                        max_speakers=max_speakers,
-                    )
-                    resp = client.post(f"{url}/transcribe-youtube-llm", json=payload)
+                payload = build_youtube_payload(
+                    url=input,
+                    fmt=format.value,
+                    notes=notes,
+                    no_filler=no_filler,
+                    min_speakers=min_speakers,
+                    max_speakers=max_speakers,
+                )
+                data = _stream_youtube(client, url, payload)
             else:
                 file_path = Path(input)
                 if not file_path.exists():
@@ -179,14 +221,111 @@ def transcribe(
                             files={"file": (file_path.name, f)},
                         )
 
+        if input_type != "youtube":
+            if resp.status_code != 200:
+                err_console.print(f"[red]Service error {resp.status_code}: {resp.json().get('detail', resp.text)}[/red]")
+                raise typer.Exit(code=1)
+            data = resp.json()
+        elapsed = time.time() - start
+        err_console.print(f"[green]Done ({elapsed:.0f}s)[/green]")
+        render_output(data, format.value)
+
+    except httpx.ConnectError:
+        err_console.print(f"[red]Cannot connect to service at {url}. Is docker compose up?[/red]")
+        raise typer.Exit(code=1)
+
+
+def render_ocr_output(data: dict) -> None:
+    """Print OCR result to stdout."""
+    if not data.get("success"):
+        err_console.print(f"[red]OCR failed: {data.get('error', 'unknown')}[/red]")
+        return
+
+    spans = data.get("spans", [])
+    if not spans:
+        err_console.print("[yellow]No text detected in video frames.[/yellow]")
+        return
+
+    meta = data.get("video_metadata")
+    if meta and meta.get("title"):
+        console.print(Markdown(f"# {meta['title']}"))
+        console.print()
+
+    for span in spans:
+        t_start = span["start_time"]
+        t_end = span["end_time"]
+        conf = span["confidence"]
+        frames = span["frame_count"]
+        time_label = f"{t_start:.1f}s" if t_start == t_end else f"{t_start:.1f}s - {t_end:.1f}s"
+        header = f"## [{time_label}] (conf: {conf:.0%}, {frames} frame{'s' if frames != 1 else ''})"
+        console.print(Markdown(header))
+        print(span["text"])
+        print()
+
+    total = data.get("total_frames_processed", 0)
+    ms = data.get("processing_time_ms", 0)
+    err_console.print(f"[green]{len(spans)} spans from {total} frames ({ms / 1000:.1f}s)[/green]")
+
+
+@app.command()
+def ocr(
+    input: str = typer.Argument(..., help="YouTube URL or path to a local video file"),
+    max_frames: int = typer.Option(20, "--max-frames", help="Maximum frames to extract"),
+    threshold: float = typer.Option(0.3, "--threshold", help="Scene change threshold (0.0-1.0)"),
+    lang: str = typer.Option("en", "--lang", help="OCR language"),
+    url: str = typer.Option("http://localhost:8002", "--url", help="Service base URL"),
+    raw: bool = typer.Option(False, "--raw", help="Output raw JSON instead of formatted text"),
+) -> None:
+    """Extract text from video frames using OCR."""
+    input_type = detect_input_type(input)
+    start = time.time()
+
+    try:
+        with httpx.Client(timeout=300) as client:
+            if input_type == "youtube":
+                payload = {
+                    "youtube_url": input,
+                    "max_frames": max_frames,
+                    "scene_threshold": threshold,
+                    "lang": lang,
+                }
+                with err_console.status("[bold green]Downloading video and extracting text...[/bold green]"):
+                    resp = client.post(f"{url}/ocr-youtube", json=payload)
+            else:
+                file_path = Path(input)
+                if not file_path.exists():
+                    err_console.print(f"[red]File not found: {input}[/red]")
+                    raise typer.Exit(code=1)
+                fields = {
+                    "max_frames": str(max_frames),
+                    "scene_threshold": str(threshold),
+                    "lang": lang,
+                }
+                with err_console.status("[bold green]Extracting text from video...[/bold green]"):
+                    with open(file_path, "rb") as f:
+                        resp = client.post(
+                            f"{url}/ocr-file",
+                            data=fields,
+                            files={"file": (file_path.name, f)},
+                        )
+
         if resp.status_code != 200:
-            err_console.print(f"[red]Service error {resp.status_code}: {resp.json().get('detail', resp.text)}[/red]")
+            detail = resp.text
+            try:
+                detail = resp.json().get("detail", detail)
+            except Exception:
+                pass
+            err_console.print(f"[red]Service error {resp.status_code}: {detail}[/red]")
             raise typer.Exit(code=1)
 
         data = resp.json()
         elapsed = time.time() - start
         err_console.print(f"[green]Done ({elapsed:.0f}s)[/green]")
-        render_output(data, format.value)
+
+        if raw:
+            print(json.dumps(data, indent=2))
+        else:
+            render_ocr_output(data)
 
     except httpx.ConnectError:
         err_console.print(f"[red]Cannot connect to service at {url}. Is docker compose up?[/red]")
