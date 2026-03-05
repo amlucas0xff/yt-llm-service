@@ -1,0 +1,4 @@
+results/
+test_frames/*.png
+test_frames/*.jpg
+test_frames/*.jpeg
