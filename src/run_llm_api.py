@@ -7,6 +7,9 @@ from pydantic import BaseModel
 from typing import Optional
 import os
 import logging
+import time
+import subprocess
+import uuid
 from pathlib import Path
 import tempfile
 import shutil
@@ -18,6 +21,9 @@ from simple_logger import log_action
 from notes_service import NotesService
 from user_config import load_user_config
 from obsidian_service import ObsidianService
+from frame_extractor import extract_scene_frames, cleanup_frames
+from ocr_client import OCRClient
+from ocr_dedup import deduplicate_ocr_results
 
 # Initialize configuration first
 config = Config()
@@ -33,6 +39,10 @@ logger = logging.getLogger(__name__)
 transcription_service = TranscriptionService(config)
 audio_downloader = AudioDownloader(temp_dir=config.TEMP_DIR)
 notes_service = NotesService(config)
+ocr_client = OCRClient(
+    base_url=config.OCR_SERVICE_URL,
+    timeout=config.OCR_SERVICE_TIMEOUT,
+)
 _user_cfg = load_user_config()
 obsidian_service: Optional[ObsidianService] = (
     ObsidianService(
@@ -144,6 +154,31 @@ class LLMTranscriptionResponse(BaseModel):
     notes: Optional[str] = None
     corrected_transcript: Optional[str] = None
     video_metadata: Optional[dict] = None
+
+
+class YouTubeOCRRequest(BaseModel):
+    youtube_url: str
+    scene_threshold: float = 0.3
+    max_frames: int = 100
+    lang: str = "en"
+
+
+class OCRSpan(BaseModel):
+    start_time: float
+    end_time: float
+    text: str
+    confidence: float
+    frame_count: int
+
+
+class OCRResponse(BaseModel):
+    success: bool
+    spans: list[OCRSpan]
+    total_spans: int
+    total_frames_processed: int
+    processing_time_ms: float
+    video_metadata: Optional[dict] = None
+    error: Optional[str] = None
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -927,6 +962,164 @@ async def extract_metadata(request: MetadataExtractionRequest):
         raise HTTPException(status_code=500, detail=error_msg)
 
 
+def _video_context_to_dict(ctx) -> dict:
+    """Convert VideoContext to a plain dict for the response."""
+    return {
+        "video_id": ctx.video_id,
+        "title": ctx.title,
+        "channel": ctx.channel,
+        "tags": ctx.tags,
+        "categories": ctx.categories,
+    }
+
+
+@app.post("/ocr-youtube", response_model=OCRResponse)
+async def ocr_youtube(request: YouTubeOCRRequest):
+    """Extract text from YouTube video frames using OCR."""
+    start = time.perf_counter()
+    logger.info(f"OCR request for YouTube URL: {request.youtube_url}")
+
+    video_path = None
+    frames = []
+    try:
+        video_id = audio_downloader._extract_video_id(request.youtube_url)
+        video_context = audio_downloader.get_video_context(request.youtube_url)
+
+        video_path = Path(config.TEMP_DIR) / f"ocr_{video_id}_{uuid.uuid4().hex[:8]}.mp4"
+        dl_result = subprocess.run([
+            "yt-dlp", "-f", "bestvideo[height<=1080][ext=mp4]/best[height<=1080]",
+            "--merge-output-format", "mp4",
+            "-o", str(video_path), request.youtube_url,
+        ], capture_output=True, text=True, timeout=120)
+        if dl_result.returncode != 0:
+            raise RuntimeError(f"yt-dlp failed: {dl_result.stderr[:200]}")
+
+        frames = extract_scene_frames(
+            str(video_path),
+            scene_threshold=request.scene_threshold,
+            max_frames=request.max_frames,
+        )
+
+        if not frames:
+            return OCRResponse(
+                success=True, spans=[], total_spans=0, total_frames_processed=0,
+                processing_time_ms=(time.perf_counter() - start) * 1000,
+                video_metadata=_video_context_to_dict(video_context) if video_context else None,
+            )
+
+        image_paths = [f.path for f in frames]
+        ocr_result = await ocr_client.ocr_images(image_paths, lang=request.lang)
+
+        if ocr_result is None:
+            return OCRResponse(
+                success=False, spans=[], total_spans=0, total_frames_processed=0,
+                processing_time_ms=(time.perf_counter() - start) * 1000,
+                error="ocr-service unavailable",
+            )
+
+        raw_entries = [
+            (frame.timestamp_s, ocr_frame.full_text, ocr_frame.avg_confidence)
+            for frame, ocr_frame in zip(frames, ocr_result.results)
+        ]
+        spans = deduplicate_ocr_results(raw_entries)
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        return OCRResponse(
+            success=True,
+            spans=[OCRSpan(**s) for s in spans],
+            total_spans=len(spans),
+            total_frames_processed=len(frames),
+            processing_time_ms=elapsed_ms,
+            video_metadata=_video_context_to_dict(video_context) if video_context else None,
+        )
+
+    except Exception as e:
+        logger.error(f"OCR YouTube error: {e}")
+        return OCRResponse(
+            success=False, spans=[], total_spans=0, total_frames_processed=0,
+            processing_time_ms=(time.perf_counter() - start) * 1000,
+            error=str(e),
+        )
+    finally:
+        if frames:
+            cleanup_frames(frames)
+        if video_path and Path(video_path).exists():
+            Path(video_path).unlink(missing_ok=True)
+
+
+@app.post("/ocr-file", response_model=OCRResponse)
+async def ocr_file(
+    file: UploadFile = File(...),
+    scene_threshold: float = Form(0.3),
+    max_frames: int = Form(100),
+    lang: str = Form("en"),
+):
+    """Extract text from uploaded video file frames using OCR."""
+    start = time.perf_counter()
+    logger.info(f"OCR request for uploaded file: {file.filename}")
+
+    upload_path = None
+    frames = []
+    try:
+        safe_name = Path(file.filename).stem[:50]
+        upload_path = Path(config.TEMP_DIR) / f"ocr_upload_{safe_name}_{uuid.uuid4().hex[:8]}.mp4"
+        with open(upload_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        frames = extract_scene_frames(
+            str(upload_path),
+            scene_threshold=scene_threshold,
+            max_frames=max_frames,
+        )
+
+        if not frames:
+            return OCRResponse(
+                success=True, spans=[], total_spans=0, total_frames_processed=0,
+                processing_time_ms=(time.perf_counter() - start) * 1000,
+            )
+
+        image_paths = [f.path for f in frames]
+        ocr_result = await ocr_client.ocr_images(image_paths, lang=lang)
+
+        total_frames = len(frames)
+
+        if ocr_result is None:
+            return OCRResponse(
+                success=False, spans=[], total_spans=0, total_frames_processed=0,
+                processing_time_ms=(time.perf_counter() - start) * 1000,
+                error="ocr-service unavailable",
+            )
+
+        raw_entries = [
+            (frame.timestamp_s, ocr_frame.full_text, ocr_frame.avg_confidence)
+            for frame, ocr_frame in zip(frames, ocr_result.results)
+        ]
+        spans = deduplicate_ocr_results(raw_entries)
+
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        return OCRResponse(
+            success=True,
+            spans=[OCRSpan(**s) for s in spans],
+            total_spans=len(spans),
+            total_frames_processed=total_frames,
+            processing_time_ms=elapsed_ms,
+        )
+
+    except Exception as e:
+        logger.error(f"OCR file error: {e}")
+        return OCRResponse(
+            success=False, spans=[], total_spans=0, total_frames_processed=0,
+            processing_time_ms=(time.perf_counter() - start) * 1000,
+            error=str(e),
+        )
+    finally:
+        if frames:
+            cleanup_frames(frames)
+        if upload_path and upload_path.exists():
+            upload_path.unlink(missing_ok=True)
+
+
 @app.get("/")
 async def root():
     """Root endpoint"""
@@ -943,6 +1136,8 @@ async def root():
             "transcribe-youtube-llm": "/transcribe-youtube-llm",
             "transcribe-file-llm": "/transcribe-file-llm",
             "extract-metadata": "/extract-metadata",
+            "ocr-youtube": "/ocr-youtube",
+            "ocr-file": "/ocr-file",
             "docs": "/docs",
         },
         "llm_endpoints": {
