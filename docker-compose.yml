@@ -75,3 +75,25 @@ services:
       timeout: 10s
       start_period: 300s
       retries: 10
+
+  ocr-service:
+    build: ./ocr-service
+    container_name: ocr-service
+    ports:
+      - "8003:8003"
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - PADDLE_PDX_DISABLE_MODEL_SOURCE_CHECK=True
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ['1']
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
