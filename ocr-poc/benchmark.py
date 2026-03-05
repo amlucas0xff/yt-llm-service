@@ -83,7 +83,7 @@ def run_paddle(frames: list[tuple[str, Image.Image]]) -> list[FrameResult]:
     from paddleocr import PaddleOCR
 
     print("[paddle] Initializing PaddleOCR...", file=sys.stderr)
-    ocr = PaddleOCR(use_angle_cls=True, lang="en", show_log=False)
+    ocr = PaddleOCR(use_textline_orientation=True, lang="en")
 
     results = []
     for fname, img in frames:
@@ -92,17 +92,18 @@ def run_paddle(frames: list[tuple[str, Image.Image]]) -> list[FrameResult]:
 
         start = time.perf_counter()
         try:
-            raw = ocr.ocr(img_np, cls=True)
+            raw = ocr.predict(img_np)
             elapsed_ms = (time.perf_counter() - start) * 1000
 
-            # Extract text and confidence
+            # PaddleOCR v3 returns dict-like OCRResult with rec_texts/rec_scores keys
             lines = []
             confidences = []
-            if raw and raw[0]:
-                for line in raw[0]:
-                    text, conf = line[1]
-                    lines.append(text)
-                    confidences.append(conf)
+            for result in raw:
+                texts = result.get("rec_texts", [])
+                scores = result.get("rec_scores", [])
+                if texts:
+                    lines.extend(texts)
+                    confidences.extend(scores)
 
             text = "\n".join(lines)
             avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
@@ -124,12 +125,17 @@ def run_paddle(frames: list[tuple[str, Image.Image]]) -> list[FrameResult]:
 
 def run_surya(frames: list[tuple[str, Image.Image]]) -> list[FrameResult]:
     """Run Surya OCR on all frames. Returns list of FrameResult."""
-    from surya.recognition import RecognitionPredictor
-    from surya.detection import DetectionPredictor
+    from surya.model.detection.model import load_model as load_det_model
+    from surya.model.detection.model import load_processor as load_det_processor
+    from surya.model.recognition.model import load_model as load_rec_model
+    from surya.model.recognition.processor import load_processor as load_rec_processor
+    from surya.ocr import run_ocr
 
-    print("[surya] Initializing Surya OCR...", file=sys.stderr)
-    det_predictor = DetectionPredictor()
-    rec_predictor = RecognitionPredictor()
+    print("[surya] Loading Surya OCR models...", file=sys.stderr)
+    det_model = load_det_model()
+    det_processor = load_det_processor()
+    rec_model = load_rec_model()
+    rec_processor = load_rec_processor()
 
     results = []
     for fname, img in frames:
@@ -137,14 +143,16 @@ def run_surya(frames: list[tuple[str, Image.Image]]) -> list[FrameResult]:
 
         start = time.perf_counter()
         try:
-            predictions = rec_predictor([img], det_predictor=det_predictor)
+            ocr_results = run_ocr(
+                [img], [["en"]], det_model, det_processor,
+                rec_model, rec_processor,
+            )
             elapsed_ms = (time.perf_counter() - start) * 1000
 
-            # Extract text from predictions
             lines = []
             confidences = []
-            if predictions and len(predictions) > 0:
-                for text_line in predictions[0].text_lines:
+            if ocr_results and len(ocr_results) > 0:
+                for text_line in ocr_results[0].text_lines:
                     lines.append(text_line.text)
                     confidences.append(text_line.confidence)
 
