@@ -1,4 +1,4 @@
-"""Unit tests for NotesService GEC context injection."""
+"""Unit tests for NotesService video-context injection."""
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from audio_downloader import VideoContext
@@ -13,8 +13,20 @@ def make_service():
     return NotesService(cfg)
 
 
+def patched_post(captured_payload):
+    """Return an AsyncMock post() that records the JSON body it was called with."""
+    async def fake_post(url, json=None, **kwargs):
+        captured_payload.update(json)
+        resp = MagicMock()
+        resp.raise_for_status = MagicMock()
+        resp.json.return_value = {"choices": [{"message": {"content": "# Notes"}}]}
+        return resp
+
+    return AsyncMock(side_effect=fake_post)
+
+
 @pytest.mark.asyncio
-async def test_correct_transcript_injects_context_block():
+async def test_generate_injects_context_block():
     """When VideoContext is provided, the user message must contain the context block."""
     svc = make_service()
     ctx = VideoContext(
@@ -28,44 +40,35 @@ async def test_correct_transcript_injects_context_block():
 
     captured_payload = {}
 
-    async def fake_post(url, json=None, **kwargs):
-        captured_payload.update(json)
-        resp = MagicMock()
-        resp.raise_for_status = MagicMock()
-        resp.json.return_value = {
-            "choices": [{"message": {"content": "corrected text"}}]
-        }
-        return resp
-
     with patch("httpx.AsyncClient") as MockClient:
-        MockClient.return_value.__aenter__.return_value.post = AsyncMock(side_effect=fake_post)
-        await svc.correct_transcript("raw whisperx", "yt captions", video_context=ctx)
+        MockClient.return_value.__aenter__.return_value.post = patched_post(captured_payload)
+        await svc.generate("raw whisperx transcript", video_context=ctx)
 
     user_msg = captured_payload["messages"][1]["content"]
     assert "Claude 3.7 Deep Dive" in user_msg
     assert "Anthropic" in user_msg
     assert "claude, anthropic" in user_msg
+    assert "raw whisperx transcript" in user_msg
 
 
 @pytest.mark.asyncio
-async def test_correct_transcript_without_context_omits_block():
+async def test_generate_without_context_sends_bare_transcript():
     """When no VideoContext is provided, no context block should appear in the prompt."""
     svc = make_service()
 
     captured_payload = {}
 
-    async def fake_post(url, json=None, **kwargs):
-        captured_payload.update(json)
-        resp = MagicMock()
-        resp.raise_for_status = MagicMock()
-        resp.json.return_value = {
-            "choices": [{"message": {"content": "corrected text"}}]
-        }
-        return resp
-
     with patch("httpx.AsyncClient") as MockClient:
-        MockClient.return_value.__aenter__.return_value.post = AsyncMock(side_effect=fake_post)
-        await svc.correct_transcript("raw whisperx", "yt captions")
+        MockClient.return_value.__aenter__.return_value.post = patched_post(captured_payload)
+        await svc.generate("raw whisperx transcript")
 
     user_msg = captured_payload["messages"][1]["content"]
-    assert "## Video Context" not in user_msg
+    assert user_msg == "raw whisperx transcript"
+    assert "<video_context>" not in user_msg
+
+
+def test_correction_api_is_gone():
+    """ADR 0001: the dual-ASR correction pass was removed from NotesService."""
+    svc = make_service()
+    assert not hasattr(svc, "correct_transcript")
+    assert not hasattr(svc, "_correct_chunk")

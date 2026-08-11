@@ -23,7 +23,6 @@ def test_get_video_context_returns_dataclass(tmp_path):
     with patch("yt_dlp.YoutubeDL") as MockYDL:
         instance = MockYDL.return_value.__enter__.return_value
         instance.extract_info.return_value = FAKE_INFO
-        instance.process_info.return_value = None
 
         ctx = dl.get_video_context("https://www.youtube.com/watch?v=abc123")
 
@@ -43,7 +42,12 @@ def test_get_video_context_never_raises_on_error(tmp_path):
 
     assert isinstance(ctx, VideoContext)
     assert ctx.title == ""
-    assert ctx.captions is None
+    assert ctx.video_id == "abc123"
+
+
+def test_video_context_no_longer_carries_captions():
+    """ADR 0001: captions existed only to feed the dual-ASR correction pass."""
+    assert not hasattr(VideoContext(), "captions")
 
 
 def test_download_audio_result_includes_video_context(tmp_path):

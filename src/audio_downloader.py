@@ -7,7 +7,7 @@ import subprocess
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 import logging
 import re
 
@@ -16,14 +16,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class VideoContext:
-    """All metadata and captions for a YouTube video, fetched in one extract_info() call."""
+    """Metadata for a YouTube video, fetched in one extract_info() call."""
     video_id: str = ""
     title: str = ""
     description: str = ""   # truncated to 500 chars
     channel: str = ""
     tags: list[str] = field(default_factory=list)
     categories: list[str] = field(default_factory=list)
-    captions: Optional[str] = None   # parsed VTT plain text, or None
 
 
 class AudioDownloader:
@@ -73,38 +72,9 @@ class AudioDownloader:
 
         return any(re.match(pattern, url) for pattern in youtube_patterns)
 
-    def _parse_vtt(self, vtt_text: str) -> str:
-        """
-        Convert WebVTT content to plain deduplicated text.
-        Strips timestamps, inline timing tags, cue IDs, and duplicate consecutive lines.
-        """
-        lines = vtt_text.split("\n")
-        clean = []
-        for line in lines:
-            line = line.strip()
-            if (not line
-                    or line.startswith("WEBVTT")
-                    or line.startswith("Kind:")
-                    or line.startswith("Language:")):
-                continue
-            # skip timestamp lines (00:00:00.000 --> 00:00:01.000 ...)
-            if re.match(r"^\d{2}:\d{2}", line):
-                continue
-            # skip numeric-only cue IDs
-            if re.match(r"^\d+$", line):
-                continue
-            # strip inline timing tags like <00:00:01.200><c>
-            line = re.sub(r"<[^>]+>", "", line).strip()
-            if not line:
-                continue
-            # deduplicate consecutive identical lines (VTT repeats lines as captions scroll)
-            if not clean or clean[-1] != line:
-                clean.append(line)
-        return " ".join(clean)
-
     def get_video_context(self, youtube_url: str) -> "VideoContext":
         """
-        Fetch all YouTube metadata and captions in a single extract_info() call.
+        Fetch YouTube metadata in a single extract_info() call.
 
         Returns a VideoContext dataclass. Never raises — all fields default to
         empty on any error so audio download can proceed regardless.
@@ -112,7 +82,6 @@ class AudioDownloader:
         Auth: cookies-only (no impersonate — Python API crashes on that option
         in yt-dlp 2026.02.21).
         """
-        import tempfile
         try:
             import yt_dlp
 
@@ -120,30 +89,14 @@ class AudioDownloader:
                 "quiet": True,
                 "no_warnings": True,
                 "skip_download": True,
-                "writeautomaticsub": True,
-                "subtitleslangs": ["en-orig", "en"],
-                "subtitlesformat": "vtt",
-                "outtmpl": "%(id)s.%(ext)s",
                 "noplaylist": True,
             }
             cookie_path = Path("/app/cookies.txt")
             if cookie_path.exists() and cookie_path.stat().st_size > 100:
                 ydl_opts["cookiefile"] = str(cookie_path)
 
-            with tempfile.TemporaryDirectory() as tmpdir:
-                ydl_opts["paths"] = {"home": tmpdir}
-
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(youtube_url, download=False)
-                    ydl.process_info(info)  # triggers subtitle download
-
-                # Parse captions
-                tmppath = Path(tmpdir)
-                vtt_file = (
-                    next(tmppath.glob("*.en-orig.vtt"), None)
-                    or next(tmppath.glob("*.en.vtt"), None)
-                )
-                captions = self._parse_vtt(vtt_file.read_text(encoding="utf-8")) if vtt_file else None
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(youtube_url, download=False)
 
             description = (info.get("description") or "")[:500]
             return VideoContext(
@@ -153,7 +106,6 @@ class AudioDownloader:
                 channel=info.get("channel") or info.get("uploader") or "",
                 tags=info.get("tags") or [],
                 categories=info.get("categories") or [],
-                captions=captions,
             )
 
         except Exception as e:
@@ -185,7 +137,7 @@ class AudioDownloader:
         video_id = self._extract_video_id(youtube_url)
         logger.info(f"Downloading audio for video: {video_id}")
 
-        # Fetch all metadata + captions in one call
+        # Fetch all metadata in one call
         ctx = self.get_video_context(youtube_url)
         video_title = ctx.title
         logger.info(f"Video title: {video_title}")

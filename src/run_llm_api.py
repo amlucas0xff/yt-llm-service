@@ -138,7 +138,6 @@ class YouTubeLLMTranscriptionRequest(BaseModel):
     merge_consecutive_speakers: bool = True
     verbose: bool = True
     generate_notes: bool = False
-    use_yt_captions: bool = True  # opt-in GEC correction using YouTube auto-captions
 
 
 class LLMTranscriptionResponse(BaseModel):
@@ -152,7 +151,6 @@ class LLMTranscriptionResponse(BaseModel):
     metadata: dict
     error: Optional[str] = None
     notes: Optional[str] = None
-    corrected_transcript: Optional[str] = None
     video_metadata: Optional[dict] = None
 
 
@@ -527,31 +525,7 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
         if "blocks" in llm_result:
             response_data["blocks"] = llm_result["blocks"]
 
-        # --- GEC: use captions from video_ctx (fetched during download) ---
-        corrected_transcript = None
-        if request.use_yt_captions and video_ctx and video_ctx.captions:
-            try:
-                # Extract plain text from all possible format shapes
-                raw_text = llm_result.get("text") or ""
-                if not raw_text and "blocks" in llm_result:
-                    raw_text = " ".join(b.get("text", "") for b in llm_result["blocks"])
-                if not raw_text and "speakers" in llm_result:
-                    raw_text = " ".join(
-                        t for t in llm_result["speakers"].values() if t
-                    )
-                if raw_text:
-                    corrected_transcript = await notes_service.correct_transcript(
-                        whisperx_text=raw_text,
-                        yt_captions_text=video_ctx.captions,
-                        video_context=video_ctx,
-                    )
-                    logger.info("GEC correction applied to transcript")
-            except Exception as e:
-                logger.warning(f"GEC pipeline failed (non-fatal): {e}")
-
-        # Use corrected transcript downstream if available
-        transcript_for_notes = corrected_transcript or llm_result.get("text") or ""
-        response_data["corrected_transcript"] = corrected_transcript
+        transcript_for_notes = llm_result.get("text") or ""
         response_data["video_metadata"] = {
             "title": video_ctx.title,
             "channel": video_ctx.channel,
