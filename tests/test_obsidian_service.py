@@ -1,4 +1,5 @@
 import pytest
+import yaml
 from pathlib import Path
 from datetime import date
 
@@ -67,7 +68,6 @@ def test_save_note_sanitizes_title(tmp_path):
 
 
 def test_save_note_records_source_transcript_path(tmp_path):
-    yaml = pytest.importorskip("yaml")
     from obsidian_service import ObsidianService
     svc = ObsidianService(vault_path=tmp_path, inbox_dir="Inbox")
     transcript = "/app/output/Understanding Transformers/transcription_1.md"
@@ -132,7 +132,6 @@ async def test_truncation_flag_reflects_real_notes_generation(tmp_path):
 
 def test_save_note_quotes_transcript_path_so_frontmatter_stays_valid(tmp_path):
     """OUTPUT_DIR is user-configurable; an unquoted ': ' breaks the YAML Obsidian parses."""
-    yaml = pytest.importorskip("yaml")
     from obsidian_service import ObsidianService
 
     svc = ObsidianService(vault_path=tmp_path, inbox_dir="Inbox")

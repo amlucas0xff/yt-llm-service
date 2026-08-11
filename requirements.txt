@@ -36,6 +36,7 @@ pytest-asyncio>=0.21.1
 pytest-cov>=4.0.0
 pytest-mock>=3.0.0
 httpx>=0.25.0
+pyyaml>=6.0  # frontmatter assertions parse real YAML
 grpcio>=1.68.1  # Added explicit grpcio version
 
 # TOML parsing (tomllib is stdlib in Python 3.11+; tomli is the backport for 3.10)

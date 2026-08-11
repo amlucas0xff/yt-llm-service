@@ -4,6 +4,8 @@
 # so it needs the API and CLI libraries but none of the ML stack. Keeping the
 # list here rather than reusing requirements.txt is what makes `make test`
 # install in seconds instead of pulling several GB of CUDA wheels.
+PYTHON ?= 3.12
+
 TEST_DEPS := pytest pytest-asyncio pytest-mock \
              fastapi httpx pydantic python-dotenv python-multipart \
              typer rich yt-dlp pyyaml
@@ -11,7 +13,7 @@ TEST_DEPS := pytest pytest-asyncio pytest-mock \
 # sys.path, TEMP_DIR/OUTPUT_DIR and the yt-dlp shim are all set up by
 # conftest.py, so this needs no environment of its own.
 test:
-	uv run --no-project --python 3.12 \
+	uv run --no-project --python $(PYTHON) \
 	  $(foreach dep,$(TEST_DEPS),--with $(dep)) \
 	  pytest tests/ $(ARGS)
 
