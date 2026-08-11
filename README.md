@@ -293,7 +293,20 @@ Generated notes can be automatically mirrored to your Obsidian vault.
    inbox_dir = "Inbox"                    # subdirectory inside vault
    tags = ["video-notes"]
    ```
-3. Run `transcribe` as usual — if notes are generated, they are also saved to `{vault_path}/{inbox_dir}/{Title}.md` with YAML frontmatter (date, source URL, tags).
+3. Run `transcribe` as usual — if notes are generated, they are also saved to `{vault_path}/{inbox_dir}/{Title}.md` with YAML frontmatter:
+
+   ```yaml
+   ---
+   date: 2026-08-11
+   source: https://youtu.be/abc123
+   source_transcript: /app/output/Understanding Transformers/transcription_1.md
+   truncated: false
+   tags:
+     - video-notes
+   ---
+   ```
+
+   `source_transcript` points back at the transcript the notes were made from. `truncated: true` means the transcript exceeded `NOTES_MAX_TOKENS` and its middle was dropped before the model saw it — the notes then cover only the beginning and end.
 
 The integration is silent: if the config file is absent or `enabled = false`, nothing changes.
 

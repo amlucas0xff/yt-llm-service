@@ -10,6 +10,7 @@ the long HTTP call to llama-cpp (model generation can take 30-300 seconds).
 """
 
 import logging
+from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 
 import httpx
@@ -73,6 +74,19 @@ TRUNCATION_NOTICE = (
 )
 
 
+@dataclass
+class NotesResult:
+    """Generated notes plus how faithfully the transcript reached the model.
+
+    `truncated` is provenance, not an error: the notes are still usable, but
+    they only cover the head and tail of the transcript. It is written into the
+    Obsidian frontmatter so a reader can tell coverage from completeness.
+    """
+
+    text: Optional[str] = None
+    truncated: bool = False
+
+
 class NotesService:
     """Generates structured notes from a transcript using gpt-oss-20b via llama.cpp."""
 
@@ -83,14 +97,16 @@ class NotesService:
         # read=300s: generation on a 20B model can be slow for long transcripts
         self.timeout = httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
 
-    def _truncate_transcript(self, text: str) -> str:
+    def _truncate_transcript(self, text: str) -> tuple[str, bool]:
         """
         If transcript exceeds max_tokens (approximated as words * 1.3),
         preserve the first 25% and last 25%, truncating the middle.
+
+        Returns (transcript, truncated).
         """
         approx_tokens = len(text.split()) * 1.3
         if approx_tokens <= self.max_tokens:
-            return text
+            return text, False
 
         logger.warning(
             f"Transcript too long (~{int(approx_tokens)} tokens). Truncating middle."
@@ -99,13 +115,13 @@ class NotesService:
         keep = int(len(words) * 0.25)
         first_part = " ".join(words[:keep])
         last_part = " ".join(words[-keep:])
-        return first_part + TRUNCATION_NOTICE + last_part
+        return first_part + TRUNCATION_NOTICE + last_part, True
 
     async def generate(
         self,
         transcript_text: str,
         video_context: Optional["VideoContext"] = None,
-    ) -> Optional[str]:
+    ) -> NotesResult:
         """
         Generate structured markdown notes from a transcript.
 
@@ -119,15 +135,16 @@ class NotesService:
                            so the model spells names the way the video does.
 
         Returns:
-            Markdown string with structured notes, or None if generation fails.
+            NotesResult. `text` is None if generation fails; `truncated` says
+            whether the transcript's middle was dropped before prompting.
         """
         if not transcript_text or not transcript_text.strip():
             logger.warning("Empty transcript passed to NotesService.generate()")
-            return None
+            return NotesResult()
 
         log_action("Generating structured notes from transcript")
 
-        transcript = self._truncate_transcript(transcript_text)
+        transcript, truncated = self._truncate_transcript(transcript_text)
 
         if video_context:
             user_content = (
@@ -166,30 +183,30 @@ class NotesService:
             choices = data.get("choices", [])
             if not choices:
                 logger.error("llama-cpp returned empty choices list")
-                return None
+                return NotesResult(truncated=truncated)
 
             content = choices[0].get("message", {}).get("content", "").strip()
             if not content:
                 logger.error("llama-cpp returned empty content in choice[0]")
-                return None
+                return NotesResult(truncated=truncated)
 
             logger.info(f"Notes generated successfully ({len(content)} chars)")
-            return content
+            return NotesResult(text=content, truncated=truncated)
 
         except httpx.ConnectError as e:
             logger.warning(f"llama-cpp service unavailable: {e}")
-            return None
+            return NotesResult(truncated=truncated)
         except httpx.TimeoutException as e:
             logger.warning(f"llama-cpp request timed out: {e}")
-            return None
+            return NotesResult(truncated=truncated)
         except httpx.HTTPStatusError as e:
             logger.error(
                 f"llama-cpp HTTP error {e.response.status_code}: {e.response.text[:200]}"
             )
-            return None
+            return NotesResult(truncated=truncated)
         except Exception as e:
             logger.error(f"Unexpected error calling llama-cpp: {e}")
-            return None
+            return NotesResult(truncated=truncated)
 
     def _build_context_block(self, video_context: "VideoContext") -> str:
         """Format VideoContext as an authoritative grounding block for LLM prompts.

@@ -2,7 +2,7 @@
 import pytest
 from unittest.mock import patch, AsyncMock, MagicMock
 from audio_downloader import VideoContext
-from notes_service import NotesService
+from notes_service import NotesService, TRUNCATION_NOTICE
 from config import Config
 
 
@@ -72,3 +72,37 @@ def test_correction_api_is_gone():
     svc = make_service()
     assert not hasattr(svc, "correct_transcript")
     assert not hasattr(svc, "_correct_chunk")
+
+
+@pytest.mark.asyncio
+async def test_generate_reports_no_truncation_for_short_transcript():
+    svc = make_service()
+
+    with patch("httpx.AsyncClient") as MockClient:
+        MockClient.return_value.__aenter__.return_value.post = patched_post({})
+        result = await svc.generate("a short transcript")
+
+    assert result.text == "# Notes"
+    assert result.truncated is False
+
+
+@pytest.mark.asyncio
+async def test_generate_reports_truncation_for_long_transcript():
+    svc = make_service()
+    svc.max_tokens = 10  # forces _truncate_transcript to bite
+
+    captured = {}
+    with patch("httpx.AsyncClient") as MockClient:
+        MockClient.return_value.__aenter__.return_value.post = patched_post(captured)
+        result = await svc.generate(" ".join(f"word{i}" for i in range(200)))
+
+    assert result.truncated is True
+    assert TRUNCATION_NOTICE.strip() in captured["messages"][1]["content"]
+
+
+@pytest.mark.asyncio
+async def test_generate_on_empty_transcript_returns_empty_result():
+    svc = make_service()
+    result = await svc.generate("   ")
+    assert result.text is None
+    assert result.truncated is False

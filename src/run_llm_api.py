@@ -322,7 +322,8 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
                     transcript_text = " ".join(
                         text for text in llm_result.get("speakers", {}).values() if text
                     )
-                notes_text = await notes_service.generate(transcript_text)
+                notes_result = await notes_service.generate(transcript_text)
+                notes_text = notes_result.text
                 if notes_text and saved_path:
                     notes_path = transcription_service.storage_service.save_notes(
                         media_filename=request.audio_file_path,
@@ -330,7 +331,12 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
                     )
                     logger.info(f"Notes saved to: {notes_path}")
                     if obsidian_service:
-                        obsidian_service.save_note(notes_text, source_url=None)
+                        obsidian_service.save_note(
+                            notes_text,
+                            source_url=None,
+                            source_transcript=saved_path,
+                            truncated=notes_result.truncated,
+                        )
             except Exception as e:
                 logger.warning(f"Notes generation failed (non-fatal): {e}")
 
@@ -518,10 +524,11 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
         notes_text = None
         if request.generate_notes:
             try:
-                notes_text = await notes_service.generate(
+                notes_result = await notes_service.generate(
                     transcript_for_notes,
                     video_context=video_ctx,
                 )
+                notes_text = notes_result.text
                 if notes_text and saved_path:
                     notes_path = transcription_service.storage_service.save_notes(
                         media_filename=storage_name,
@@ -529,7 +536,12 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
                     )
                     logger.info(f"Notes saved to: {notes_path}")
                     if obsidian_service:
-                        obsidian_service.save_note(notes_text, source_url=request.youtube_url)
+                        obsidian_service.save_note(
+                            notes_text,
+                            source_url=request.youtube_url,
+                            source_transcript=saved_path,
+                            truncated=notes_result.truncated,
+                        )
             except Exception as e:
                 logger.warning(f"Notes generation failed (non-fatal): {e}")
 
@@ -755,7 +767,8 @@ async def transcribe_file_llm(
                     transcript_text = " ".join(
                         text for text in llm_result.get("speakers", {}).values() if text
                     )
-                notes_text = await notes_service.generate(transcript_text)
+                notes_result = await notes_service.generate(transcript_text)
+                notes_text = notes_result.text
                 if notes_text and saved_path:
                     notes_path = transcription_service.storage_service.save_notes(
                         media_filename=file.filename,
@@ -763,7 +776,12 @@ async def transcribe_file_llm(
                     )
                     logger.info(f"Notes saved to: {notes_path}")
                     if obsidian_service:
-                        obsidian_service.save_note(notes_text, source_url=None)
+                        obsidian_service.save_note(
+                            notes_text,
+                            source_url=None,
+                            source_transcript=saved_path,
+                            truncated=notes_result.truncated,
+                        )
             except Exception as e:
                 logger.warning(f"Notes generation failed (non-fatal): {e}")
 

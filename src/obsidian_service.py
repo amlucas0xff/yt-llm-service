@@ -42,13 +42,21 @@ class ObsidianService:
         sanitized = re.sub(r"\s+", " ", sanitized)
         return sanitized[:100] if sanitized else "Untitled"
 
-    def _build_frontmatter(self, source_url: Optional[str]) -> str:
+    def _build_frontmatter(
+        self,
+        source_url: Optional[str],
+        source_transcript: Optional[str],
+        truncated: bool,
+    ) -> str:
         lines = [
             "---",
             f"date: {date.today().isoformat()}",
         ]
         if source_url:
             lines.append(f"source: {source_url}")
+        if source_transcript:
+            lines.append(f"source_transcript: {source_transcript}")
+        lines.append(f"truncated: {'true' if truncated else 'false'}")
         if self.tags:
             lines.append("tags:")
             for tag in self.tags:
@@ -57,10 +65,22 @@ class ObsidianService:
         return "\n".join(lines) + "\n\n"
 
     def save_note(
-        self, notes_text: str, source_url: Optional[str] = None
+        self,
+        notes_text: str,
+        source_url: Optional[str] = None,
+        source_transcript: Optional[str] = None,
+        truncated: bool = False,
     ) -> Optional[str]:
         """
         Write notes to {vault_path}/{inbox_dir}/{title}.md with YAML frontmatter.
+
+        Args:
+            notes_text: The generated markdown notes.
+            source_url: YouTube URL the notes came from, when there is one.
+            source_transcript: Path to the transcript markdown these notes
+                summarize, so the note points back at its own evidence.
+            truncated: Whether the transcript's middle was dropped before the
+                model saw it — the notes then cover only its head and tail.
 
         Returns the absolute path string on success, None on failure.
         """
@@ -72,7 +92,7 @@ class ObsidianService:
             filename = self._sanitize_filename(title) + ".md"
             file_path = inbox / filename
 
-            frontmatter = self._build_frontmatter(source_url)
+            frontmatter = self._build_frontmatter(source_url, source_transcript, truncated)
             content = frontmatter + notes_text
 
             file_path.write_text(content, encoding="utf-8")
