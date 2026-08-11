@@ -1,4 +1,4 @@
-.PHONY: test
+.PHONY: test smoke
 
 # The unit suite mocks every model call and stubs torch (tests/stubs/torch.py),
 # so it needs the API and CLI libraries but none of the ML stack. Keeping the
@@ -14,3 +14,7 @@ test:
 	uv run --no-project --python 3.12 \
 	  $(foreach dep,$(TEST_DEPS),--with $(dep)) \
 	  pytest tests/ $(ARGS)
+
+# End-to-end against the real containers. Slow, needs GPUs — run on demand.
+smoke:
+	./scripts/smoke.sh $(ARGS)

@@ -330,6 +330,25 @@ make test ARGS="-k obsidian -v"
 
 If you already have the dependencies installed, plain `pytest tests/` works too.
 
+## Smoke test
+
+```bash
+make smoke                     # default video
+make smoke ARGS="https://youtu.be/..."
+```
+
+This is the only check that runs WhisperX and llama-cpp for real. It brings the stack up with `docker compose up -d --wait`, posts a short video to `/transcribe-youtube-llm` with `generate_notes: true`, and fails unless all four hold: HTTP 200, a non-empty transcript in the response, non-empty notes in the response, and a fresh non-empty `notes.md` under `HOST_OUTPUT_DIR`.
+
+The default video is [Me at the zoo](https://www.youtube.com/watch?v=jNQXAC9IVRw) — 19 seconds, has speech, and won't be taken down.
+
+It is slow and GPU-bound, so run it on demand rather than on every commit. Budget several minutes on a cold start: llama-cpp reloads gpt-oss-20b into VRAM (~15s) and WhisperX loads its model on first request.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SMOKE_TIMEOUT` | `900` | Seconds to wait for the transcription response |
+| `SMOKE_BASE_URL` | `http://localhost:8002` | Service base URL |
+| `HOST_OUTPUT_DIR` | `./data/output` | Where the script looks for the written note |
+
 ## Project Structure
 
 ```
