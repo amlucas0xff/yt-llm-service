@@ -159,7 +159,13 @@ class AudioDownloader:
             "--no-warnings",
         ]
 
-        # Try cookies file first, fallback to other methods
+        # Auth: cookies when available, otherwise nothing.
+        #
+        # Deliberately no --impersonate: every target needs a working curl_cffi,
+        # and when that is missing yt-dlp aborts outright ("Impersonate target
+        # ... is not available") rather than falling back — so hardcoding one
+        # turns an unauthenticated download that would have worked into a hard
+        # failure. get_video_context() went cookies-only for the same reason.
         try:
             cookie_path = Path("/app/cookies.txt")
             if (
@@ -168,12 +174,9 @@ class AudioDownloader:
                 cmd.extend(["--cookies", "/app/cookies.txt"])
                 logger.info("Using cookies file for authentication")
             else:
-                # Fallback to impersonate option
-                cmd.extend(["--impersonate", "chrome-131"])
-                logger.info("Using Chrome impersonation for authentication")
+                logger.info("No cookies file — downloading unauthenticated")
         except Exception as e:
-            logger.warning(f"Cookie file check failed, using impersonate: {e}")
-            cmd.extend(["--impersonate", "chrome-131"])
+            logger.warning(f"Cookie file check failed, downloading unauthenticated: {e}")
 
         if not verbose:
             cmd.append("--quiet")

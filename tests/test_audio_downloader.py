@@ -74,3 +74,25 @@ def test_download_audio_result_includes_video_context(tmp_path):
     assert "video_context" in result
     assert isinstance(result["video_context"], VideoContext)
     assert result["title"] == "Test Video"
+
+
+def test_download_audio_does_not_hardcode_an_impersonate_target(tmp_path):
+    """--impersonate <target> hard-fails yt-dlp when that target isn't available.
+
+    Every target depends on a working curl_cffi; when it isn't, yt-dlp aborts
+    with "Impersonate target ... is not available" instead of falling back.
+    get_video_context() already went cookies-only for the same reason.
+    """
+    dl = make_downloader(tmp_path)
+    (tmp_path / "abc123.mp3").write_bytes(b"fake")
+
+    with patch.object(dl, "get_video_context") as mock_ctx, \
+         patch.object(dl, "_cleanup_old_files"), \
+         patch("subprocess.run") as mock_run:
+        mock_ctx.return_value = VideoContext(video_id="abc123", title="T")
+        mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+
+        dl.download_audio("https://www.youtube.com/watch?v=abc123")
+
+    cmd = mock_run.call_args[0][0]
+    assert "--impersonate" not in cmd, f"impersonate still passed: {cmd}"

@@ -18,12 +18,19 @@ set -euo pipefail
 # "Me at the zoo" — 19s, has speech, and as the first video ever uploaded to
 # YouTube it is about as unlikely to disappear as a URL gets.
 URL="${1:-https://www.youtube.com/watch?v=jNQXAC9IVRw}"
-OUTPUT_DIR="${HOST_OUTPUT_DIR:-./data/output}"
-TIMEOUT="${SMOKE_TIMEOUT:-900}"
-BASE_URL="${SMOKE_BASE_URL:-http://localhost:8002}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
+
+# HOST_OUTPUT_DIR normally lives in .env, which docker compose reads but the
+# shell does not — so look there before falling back, or the note check hunts
+# in ./data/output while the service writes somewhere else entirely.
+if [ -z "${HOST_OUTPUT_DIR:-}" ] && [ -f .env ]; then
+    HOST_OUTPUT_DIR=$(grep -E '^HOST_OUTPUT_DIR=' .env | tail -n 1 | cut -d= -f2- | tr -d "\"'")
+fi
+OUTPUT_DIR="${HOST_OUTPUT_DIR:-./data/output}"
+TIMEOUT="${SMOKE_TIMEOUT:-900}"
+BASE_URL="${SMOKE_BASE_URL:-http://localhost:8002}"
 
 RESPONSE_FILE="$(mktemp)"
 trap 'rm -f "$RESPONSE_FILE"' EXIT

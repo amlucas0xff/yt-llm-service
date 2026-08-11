@@ -823,7 +823,9 @@ async def extract_metadata(request: MetadataExtractionRequest):
             "skip_download": True,
         }
 
-        # Try cookies file first, fallback to other methods
+        # Cookies when available, otherwise unauthenticated. No impersonate —
+        # see the note in AudioDownloader.download_audio(): an unavailable
+        # target aborts yt-dlp instead of degrading.
         try:
             cookie_path = Path("/app/cookies.txt")
             if (
@@ -832,12 +834,9 @@ async def extract_metadata(request: MetadataExtractionRequest):
                 ydl_opts["cookiefile"] = "/app/cookies.txt"
                 logger.info("Using cookies file for authentication")
             else:
-                # Fallback to impersonate option
-                ydl_opts["impersonate"] = "chrome-131"
-                logger.info("Using Chrome impersonation for authentication")
+                logger.info("No cookies file — extracting unauthenticated")
         except Exception as e:
-            logger.warning(f"Cookie file check failed, using impersonate: {e}")
-            ydl_opts["impersonate"] = "chrome-131"
+            logger.warning(f"Cookie file check failed, extracting unauthenticated: {e}")
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # Extract full info dict

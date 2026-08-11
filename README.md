@@ -341,7 +341,9 @@ This is the only check that runs WhisperX and llama-cpp for real. It brings the 
 
 The default video is [Me at the zoo](https://www.youtube.com/watch?v=jNQXAC9IVRw) — 19 seconds, has speech, and won't be taken down.
 
-It is slow and GPU-bound, so run it on demand rather than on every commit. Budget several minutes on a cold start: llama-cpp reloads gpt-oss-20b into VRAM (~15s) and WhisperX loads its model on first request.
+Run it on demand rather than on every commit — it is GPU-bound and holds VRAM for the duration.
+
+**Observed:** 14s warm for the 19s default video (RTX 3090 Ti, both services on one GPU). The first run after `docker compose up` costs ~65s instead, because llama-cpp pages gpt-oss-20b into VRAM and WhisperX loads `large-v3-turbo` on the first request. Longer videos scale with audio length, not with this floor.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
