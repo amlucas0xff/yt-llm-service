@@ -310,6 +310,26 @@ Generated notes can be automatically mirrored to your Obsidian vault.
 
 The integration is silent: if the config file is absent or `enabled = false`, nothing changes.
 
+## Running tests
+
+```bash
+make test
+```
+
+That is the whole recipe. It runs the unit suite in a throwaway `uv` environment — no virtualenv to activate, no environment variables to set, and none of the ML stack to install (it finishes in seconds).
+
+`conftest.py` does the setup the suite needs: it puts `tests/stubs`, the repo root and `src/` on `sys.path`, points `TEMP_DIR`/`OUTPUT_DIR` at a temporary sandbox, and drops a no-op `yt-dlp` shim on `PATH`. All three matter because `run_llm_api.py` builds a `Config()` and an `AudioDownloader()` at import time.
+
+`tests/stubs/torch.py` shadows the real `torch` so the suite never pulls a CUDA wheel. Every model call is mocked; nothing here exercises WhisperX or llama-cpp for real — that is what the smoke test below is for.
+
+Pass pytest arguments through `ARGS`:
+
+```bash
+make test ARGS="-k obsidian -v"
+```
+
+If you already have the dependencies installed, plain `pytest tests/` works too.
+
 ## Project Structure
 
 ```
@@ -330,7 +350,12 @@ yt-llm-service/
 │   ├── output/                  # Saved transcriptions + notes.md
 │   ├── tmp/                     # Temporary audio files
 │   └── logs/                    # Application logs
+├── tests/                       # Unit suite (`make test`)
+│   └── stubs/                   # Stand-ins for heavyweight ML packages
+├── scripts/smoke.sh             # End-to-end test against the real containers
 ├── docs/                        # Documentation
+├── Makefile                     # `make test`, `make smoke`
+├── conftest.py                  # Test session setup (sys.path, dirs, yt-dlp shim)
 ├── docker-compose.yml           # Two-service orchestration
 ├── Dockerfile                   # yt-llm-service container image
 ├── requirements.txt             # Python dependencies
