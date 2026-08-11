@@ -15,8 +15,6 @@ Usage:
 
 from __future__ import annotations
 
-import json
-import sys
 import time
 from enum import Enum
 from pathlib import Path
@@ -134,46 +132,24 @@ def render_output(data: dict, fmt: str) -> None:
         console.print(Markdown(data["notes"]))
 
 
-def _stream_youtube(client: httpx.Client, base_url: str, payload: dict) -> dict:
-    """Consume SSE progress updates and return the final transcription payload."""
-    phase_label = "Starting transcription"
-
-    with err_console.status(f"[bold green]{phase_label}...[/bold green]") as status:
-        with client.stream("POST", f"{base_url}/transcribe-youtube-llm-stream", json=payload) as resp:
-            if resp.status_code != 200:
-                detail = resp.text
-                try:
-                    detail = resp.json().get("detail", detail)
-                except Exception:
-                    pass
-                err_console.print(f"[red]Service error {resp.status_code}: {detail}[/red]")
-                raise typer.Exit(code=1)
-
-            for line in resp.iter_lines():
-                if not line or not line.startswith("data: "):
-                    continue
-
-                try:
-                    event = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-
-                if event.get("phase") == "error":
-                    err_console.print(f"[red]{event.get('detail', 'Streaming request failed.')}[/red]")
-                    raise typer.Exit(code=1)
-
-                if event.get("phase") == "done":
-                    result = event.get("result")
-                    if not isinstance(result, dict):
-                        err_console.print("[red]Streaming response did not include a result payload.[/red]")
-                        raise typer.Exit(code=1)
-                    return result
-
-                phase_label = event.get("label") or event.get("phase") or phase_label
-                status.update(f"[bold green]{phase_label}...[/bold green]")
-
-    err_console.print("[red]Streaming response ended without a completion event.[/red]")
+def _fail_on_error_status(resp: httpx.Response) -> None:
+    """Print the service error and exit non-zero unless the response is 200."""
+    if resp.status_code == 200:
+        return
+    detail = resp.text
+    try:
+        detail = resp.json().get("detail", detail)
+    except Exception:
+        pass
+    err_console.print(f"[red]Service error {resp.status_code}: {detail}[/red]")
     raise typer.Exit(code=1)
+
+
+def post_youtube(client: httpx.Client, base_url: str, payload: dict) -> dict:
+    """POST to the synchronous YouTube endpoint and return the parsed response."""
+    resp = client.post(f"{base_url}/transcribe-youtube-llm", json=payload)
+    _fail_on_error_status(resp)
+    return resp.json()
 
 
 @app.command()
@@ -200,7 +176,8 @@ def transcribe(
                     min_speakers=min_speakers,
                     max_speakers=max_speakers,
                 )
-                data = _stream_youtube(client, url, payload)
+                with err_console.status("[bold green]Transcribing video...[/bold green]"):
+                    data = post_youtube(client, url, payload)
             else:
                 file_path = Path(input)
                 if not file_path.exists():
@@ -220,12 +197,9 @@ def transcribe(
                             data=fields,
                             files={"file": (file_path.name, f)},
                         )
+                _fail_on_error_status(resp)
+                data = resp.json()
 
-        if input_type != "youtube":
-            if resp.status_code != 200:
-                err_console.print(f"[red]Service error {resp.status_code}: {resp.json().get('detail', resp.text)}[/red]")
-                raise typer.Exit(code=1)
-            data = resp.json()
         elapsed = time.time() - start
         err_console.print(f"[green]Done ({elapsed:.0f}s)[/green]")
         render_output(data, format.value)
