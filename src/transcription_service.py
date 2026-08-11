@@ -491,7 +491,7 @@ class TranscriptionService:
         """
         try:
             # Determine transcription text based on format
-            transcription_text = self._extract_transcription_text(llm_result)
+            transcription_text = self.extract_transcript_text(llm_result)
 
             # Combine metadata from both results
             combined_metadata = self._combine_metadata(transcription_result, llm_result)
@@ -511,15 +511,21 @@ class TranscriptionService:
             logger.error(f"Failed to save transcription to disk: {str(e)}")
             return None
 
-    def _extract_transcription_text(self, llm_result: Dict[str, Any]) -> str:
+    def extract_transcript_text(self, llm_result: Dict[str, Any]) -> str:
         """
-        Extract formatted transcription text from LLM result
+        Extract plain transcript text from any format_for_llm() output shape.
+
+        The shape depends on output_format: "simple" gives `text`, "structured"
+        and "markdown" give `blocks`, "speaker" gives `speakers`. Anything that
+        consumes a transcript downstream — disk storage, notes generation — must
+        go through here rather than reaching for `text` and finding nothing.
 
         Args:
             llm_result: Formatted LLM result
 
         Returns:
-            Formatted transcription text with speaker indicators if applicable
+            Transcript text with speaker indicators if applicable, "" if the
+            result carries no recognisable transcript.
         """
         # Handle different output formats
         if "text" in llm_result:

@@ -313,15 +313,7 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
         notes_text = None
         if request.generate_notes:
             try:
-                transcript_text = llm_result.get("text") or ""
-                if not transcript_text and "blocks" in llm_result:
-                    transcript_text = " ".join(
-                        b.get("text", "") for b in llm_result.get("blocks", [])
-                    )
-                if not transcript_text and "speakers" in llm_result:
-                    transcript_text = " ".join(
-                        text for text in llm_result.get("speakers", {}).values() if text
-                    )
+                transcript_text = transcription_service.extract_transcript_text(llm_result)
                 notes_result = await notes_service.generate(transcript_text)
                 notes_text = notes_result.text
                 if notes_text and saved_path:
@@ -496,7 +488,7 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
         if "blocks" in llm_result:
             response_data["blocks"] = llm_result["blocks"]
 
-        transcript_for_notes = llm_result.get("text") or ""
+        transcript_for_notes = transcription_service.extract_transcript_text(llm_result)
         response_data["video_metadata"] = {
             "title": video_ctx.title,
             "channel": video_ctx.channel,
@@ -758,15 +750,7 @@ async def transcribe_file_llm(
         notes_text = None
         if generate_notes:
             try:
-                transcript_text = llm_result.get("text") or ""
-                if not transcript_text and "blocks" in llm_result:
-                    transcript_text = " ".join(
-                        b.get("text", "") for b in llm_result.get("blocks", [])
-                    )
-                if not transcript_text and "speakers" in llm_result:
-                    transcript_text = " ".join(
-                        text for text in llm_result.get("speakers", {}).values() if text
-                    )
+                transcript_text = transcription_service.extract_transcript_text(llm_result)
                 notes_result = await notes_service.generate(transcript_text)
                 notes_text = notes_result.text
                 if notes_text and saved_path:
