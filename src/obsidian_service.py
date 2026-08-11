@@ -42,6 +42,16 @@ class ObsidianService:
         sanitized = re.sub(r"\s+", " ", sanitized)
         return sanitized[:100] if sanitized else "Untitled"
 
+    @staticmethod
+    def _yaml_quote(value: str) -> str:
+        """Single-quote a scalar so YAML survives it.
+
+        Transcript paths sit under a user-configurable OUTPUT_DIR, so they can
+        contain ': ' — which makes an unquoted value unparseable and silently
+        costs the note all its frontmatter in Obsidian.
+        """
+        return "'" + value.replace("'", "''") + "'"
+
     def _build_frontmatter(
         self,
         source_url: Optional[str],
@@ -55,7 +65,7 @@ class ObsidianService:
         if source_url:
             lines.append(f"source: {source_url}")
         if source_transcript:
-            lines.append(f"source_transcript: {source_transcript}")
+            lines.append(f"source_transcript: {self._yaml_quote(source_transcript)}")
         lines.append(f"truncated: {'true' if truncated else 'false'}")
         if self.tags:
             lines.append("tags:")

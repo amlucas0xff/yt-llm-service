@@ -6,7 +6,7 @@
 # install in seconds instead of pulling several GB of CUDA wheels.
 TEST_DEPS := pytest pytest-asyncio pytest-mock \
              fastapi httpx pydantic python-dotenv python-multipart \
-             typer rich yt-dlp
+             typer rich yt-dlp pyyaml
 
 # sys.path, TEMP_DIR/OUTPUT_DIR and the yt-dlp shim are all set up by
 # conftest.py, so this needs no environment of its own.

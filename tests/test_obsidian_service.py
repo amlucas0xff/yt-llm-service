@@ -67,15 +67,18 @@ def test_save_note_sanitizes_title(tmp_path):
 
 
 def test_save_note_records_source_transcript_path(tmp_path):
+    yaml = pytest.importorskip("yaml")
     from obsidian_service import ObsidianService
     svc = ObsidianService(vault_path=tmp_path, inbox_dir="Inbox")
+    transcript = "/app/output/Understanding Transformers/transcription_1.md"
     path = svc.save_note(
         SAMPLE_NOTES,
         source_url="https://youtu.be/abc",
-        source_transcript="/app/output/Understanding Transformers/transcription_1.md",
+        source_transcript=transcript,
     )
-    content = Path(path).read_text()
-    assert "source_transcript: /app/output/Understanding Transformers/transcription_1.md" in content
+    front = yaml.safe_load(Path(path).read_text().split("---")[1])
+    assert front["source_transcript"] == transcript
+    assert front["source"] == "https://youtu.be/abc"
 
 
 def test_save_note_records_truncation_flag(tmp_path):
@@ -125,3 +128,19 @@ async def test_truncation_flag_reflects_real_notes_generation(tmp_path):
 
     short_path = svc.save_note(short_result.text, truncated=short_result.truncated)
     assert "truncated: false" in Path(short_path).read_text()
+
+
+def test_save_note_quotes_transcript_path_so_frontmatter_stays_valid(tmp_path):
+    """OUTPUT_DIR is user-configurable; an unquoted ': ' breaks the YAML Obsidian parses."""
+    yaml = pytest.importorskip("yaml")
+    from obsidian_service import ObsidianService
+
+    svc = ObsidianService(vault_path=tmp_path, inbox_dir="Inbox")
+    awkward = "/mnt/My Drive: backup/output/Talk/transcription_1.md"
+
+    path = svc.save_note(SAMPLE_NOTES, source_transcript=awkward)
+    front = Path(path).read_text().split("---")[1]
+
+    parsed = yaml.safe_load(front)
+    assert parsed["source_transcript"] == awkward
+    assert parsed["truncated"] is False
