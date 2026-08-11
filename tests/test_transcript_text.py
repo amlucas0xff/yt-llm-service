@@ -4,20 +4,11 @@
 A notes path that only reads `llm_result["text"]` silently generates nothing
 for exactly the format most runs use.
 """
-from unittest.mock import MagicMock
-
 from transcription_service import TranscriptionService
-from config import Config
 
 
 def make_service():
-    cfg = MagicMock(spec=Config)
-    cfg.DEVICE = "cpu"
-    cfg.COMPUTE_TYPE = "float32"
-    cfg.WHISPER_MODEL = "tiny"
-    cfg.BATCH_SIZE = 1
-    cfg.HF_TOKEN = None
-    cfg.OUTPUT_DIR = "/tmp"
+    """Bare instance — extract_transcript_text() touches no instance state."""
     return TranscriptionService.__new__(TranscriptionService)
 
 
@@ -51,3 +42,16 @@ def test_extracts_speaker_map_format():
 def test_returns_empty_string_for_unrecognised_shape():
     svc = make_service()
     assert svc.extract_transcript_text({"metadata": {}}) == ""
+
+
+def test_falls_through_when_text_is_present_but_empty():
+    """An empty `text` must not shadow a populated `blocks`/`speakers`."""
+    svc = make_service()
+    assert "real content" in svc.extract_transcript_text({
+        "text": "",
+        "blocks": [{"speaker": "SPEAKER_00", "text": "real content"}],
+    })
+    assert "real content" in svc.extract_transcript_text({
+        "text": "",
+        "speakers": {"SPEAKER_00": "real content"},
+    })

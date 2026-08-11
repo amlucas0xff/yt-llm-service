@@ -527,10 +527,11 @@ class TranscriptionService:
             Transcript text with speaker indicators if applicable, "" if the
             result carries no recognisable transcript.
         """
-        # Handle different output formats
-        if "text" in llm_result:
+        # Falsy rather than key-presence checks: an empty "text" must not
+        # shadow a populated "blocks"/"speakers".
+        if llm_result.get("text"):
             return llm_result["text"]
-        elif "speakers" in llm_result:
+        if llm_result.get("speakers"):
             # Format speakers as numbered sections
             speakers_dict = llm_result["speakers"]
             if speakers_dict:
@@ -547,7 +548,7 @@ class TranscriptionService:
                     parts.append(f"Speaker {speaker_num}: {text}")
 
                 return "\n\n".join(parts)
-        elif "blocks" in llm_result:
+        if llm_result.get("blocks"):
             # Format blocks as conversation
             blocks = llm_result["blocks"]
             if blocks:

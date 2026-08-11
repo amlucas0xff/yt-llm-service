@@ -144,6 +144,65 @@ class LLMTranscriptionResponse(BaseModel):
     video_metadata: Optional[dict] = None
 
 
+async def generate_and_persist_notes(
+    llm_result: dict,
+    storage_name: str,
+    saved_path: Optional[str],
+    source_url: Optional[str] = None,
+    video_context=None,
+) -> Optional[str]:
+    """
+    Generate notes for a finished transcription and persist them everywhere.
+
+    Every endpoint that offers `generate_notes` needs the same four steps —
+    pull the transcript out of whichever format shape came back, prompt the
+    model, write notes.md next to the transcript, and mirror the note into
+    Obsidian with its provenance. Keeping them here means a new frontmatter
+    field is one edit rather than three.
+
+    Non-fatal by contract: notes are a bonus on top of a transcription that
+    already succeeded, so any failure is logged and None is returned.
+
+    Args:
+        llm_result: Output of format_for_llm(), in any output_format shape.
+        storage_name: Key the transcription was saved under, reused for notes.
+        saved_path: Path to the saved transcript, or None if that write failed.
+            Notes are only persisted when there is a transcript to point at.
+        source_url: YouTube URL, when the transcription came from one.
+        video_context: Optional VideoContext grounding proper-noun spelling.
+
+    Returns:
+        The notes markdown, or None if generation or persistence failed.
+    """
+    try:
+        transcript_text = transcription_service.extract_transcript_text(llm_result)
+        notes_result = await notes_service.generate(
+            transcript_text,
+            video_context=video_context,
+        )
+        if not notes_result.text or not saved_path:
+            return notes_result.text
+
+        notes_path = transcription_service.storage_service.save_notes(
+            media_filename=storage_name,
+            notes_text=notes_result.text,
+        )
+        logger.info(f"Notes saved to: {notes_path}")
+
+        if obsidian_service:
+            obsidian_service.save_note(
+                notes_result.text,
+                source_url=source_url,
+                source_transcript=saved_path,
+                truncated=notes_result.truncated,
+            )
+        return notes_result.text
+
+    except Exception as e:
+        logger.warning(f"Notes generation failed (non-fatal): {e}")
+        return None
+
+
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint"""
@@ -309,28 +368,13 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
         except Exception as e:
             logger.warning(f"Failed to save transcription to disk: {str(e)}")
 
-        # Generate and save notes if requested (non-fatal: notes failure doesn't break transcription)
         notes_text = None
         if request.generate_notes:
-            try:
-                transcript_text = transcription_service.extract_transcript_text(llm_result)
-                notes_result = await notes_service.generate(transcript_text)
-                notes_text = notes_result.text
-                if notes_text and saved_path:
-                    notes_path = transcription_service.storage_service.save_notes(
-                        media_filename=request.audio_file_path,
-                        notes_text=notes_text,
-                    )
-                    logger.info(f"Notes saved to: {notes_path}")
-                    if obsidian_service:
-                        obsidian_service.save_note(
-                            notes_text,
-                            source_url=None,
-                            source_transcript=saved_path,
-                            truncated=notes_result.truncated,
-                        )
-            except Exception as e:
-                logger.warning(f"Notes generation failed (non-fatal): {e}")
+            notes_text = await generate_and_persist_notes(
+                llm_result,
+                storage_name=request.audio_file_path,
+                saved_path=saved_path,
+            )
 
         response_data["notes"] = notes_text
 
@@ -488,7 +532,6 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
         if "blocks" in llm_result:
             response_data["blocks"] = llm_result["blocks"]
 
-        transcript_for_notes = transcription_service.extract_transcript_text(llm_result)
         response_data["video_metadata"] = {
             "title": video_ctx.title,
             "channel": video_ctx.channel,
@@ -512,30 +555,15 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
         except Exception as e:
             logger.warning(f"Failed to save transcription to disk: {str(e)}")
 
-        # Generate and save notes if requested
         notes_text = None
         if request.generate_notes:
-            try:
-                notes_result = await notes_service.generate(
-                    transcript_for_notes,
-                    video_context=video_ctx,
-                )
-                notes_text = notes_result.text
-                if notes_text and saved_path:
-                    notes_path = transcription_service.storage_service.save_notes(
-                        media_filename=storage_name,
-                        notes_text=notes_text,
-                    )
-                    logger.info(f"Notes saved to: {notes_path}")
-                    if obsidian_service:
-                        obsidian_service.save_note(
-                            notes_text,
-                            source_url=request.youtube_url,
-                            source_transcript=saved_path,
-                            truncated=notes_result.truncated,
-                        )
-            except Exception as e:
-                logger.warning(f"Notes generation failed (non-fatal): {e}")
+            notes_text = await generate_and_persist_notes(
+                llm_result,
+                storage_name=storage_name,
+                saved_path=saved_path,
+                source_url=request.youtube_url,
+                video_context=video_ctx,
+            )
 
         response_data["notes"] = notes_text
 
@@ -746,28 +774,13 @@ async def transcribe_file_llm(
         except Exception as e:
             logger.warning(f"Failed to save transcription to disk: {str(e)}")
 
-        # Generate and save notes if requested
         notes_text = None
         if generate_notes:
-            try:
-                transcript_text = transcription_service.extract_transcript_text(llm_result)
-                notes_result = await notes_service.generate(transcript_text)
-                notes_text = notes_result.text
-                if notes_text and saved_path:
-                    notes_path = transcription_service.storage_service.save_notes(
-                        media_filename=file.filename,
-                        notes_text=notes_text,
-                    )
-                    logger.info(f"Notes saved to: {notes_path}")
-                    if obsidian_service:
-                        obsidian_service.save_note(
-                            notes_text,
-                            source_url=None,
-                            source_transcript=saved_path,
-                            truncated=notes_result.truncated,
-                        )
-            except Exception as e:
-                logger.warning(f"Notes generation failed (non-fatal): {e}")
+            notes_text = await generate_and_persist_notes(
+                llm_result,
+                storage_name=file.filename,
+                saved_path=saved_path,
+            )
 
         response_data["notes"] = notes_text
 

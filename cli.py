@@ -132,8 +132,11 @@ def render_output(data: dict, fmt: str) -> None:
         console.print(Markdown(data["notes"]))
 
 
-def _fail_on_error_status(resp: httpx.Response) -> None:
-    """Print the service error and exit non-zero unless the response is 200."""
+def raise_for_service_error(resp: httpx.Response) -> None:
+    """Print the service error and exit non-zero unless the response is 200.
+
+    Mirrors httpx.raise_for_status(): returns silently on success.
+    """
     if resp.status_code == 200:
         return
     detail = resp.text
@@ -148,7 +151,7 @@ def _fail_on_error_status(resp: httpx.Response) -> None:
 def post_youtube(client: httpx.Client, base_url: str, payload: dict) -> dict:
     """POST to the synchronous YouTube endpoint and return the parsed response."""
     resp = client.post(f"{base_url}/transcribe-youtube-llm", json=payload)
-    _fail_on_error_status(resp)
+    raise_for_service_error(resp)
     return resp.json()
 
 
@@ -197,7 +200,7 @@ def transcribe(
                             data=fields,
                             files={"file": (file_path.name, f)},
                         )
-                _fail_on_error_status(resp)
+                raise_for_service_error(resp)
                 data = resp.json()
 
         elapsed = time.time() - start
