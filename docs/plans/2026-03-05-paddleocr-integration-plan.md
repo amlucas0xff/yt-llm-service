@@ -696,7 +696,323 @@ git commit -m "feat: add OCR service config (URL, timeout, scene threshold, max 
 
 ---
 
-### Task 7: Add OCR endpoints to run_llm_api.py
+### Task 7: Create ocr_dedup.py — post-OCR text deduplication
+
+> **Codex review finding:** This task was originally Task 8, after the endpoints task. Swapped because the endpoints import `ocr_dedup` at module load time — the module must exist first.
+
+**Files:**
+- Create: `src/ocr_dedup.py`
+- Create: `tests/test_ocr_dedup.py`
+
+**Context:** Consecutive video frames often contain overlapping text (persistent titles, watermarks, lower thirds). Scene detection reduces frame count but does not eliminate text overlap. This module merges OCR results from consecutive frames when their text is similar, producing time-spanning entries instead of per-frame duplicates.
+
+**Algorithm:** Line-level set similarity. Split each frame's `full_text` into normalized lines, compute Jaccard similarity (intersection / union) between consecutive frames. If Jaccard >= threshold AND time gap <= `max_gap_seconds`, merge into a single span. This avoids the whole-text `SequenceMatcher` problem where "Chapter 1" and "Chapter 2" get a misleadingly high ratio (~0.89).
+
+> **Why line-level, not whole-text?** `SequenceMatcher("chapter 1: introduction", "chapter 2: data structures").ratio()` ≈ 0.55 (correct split), but for short single-line texts like "Chapter 1" vs "Chapter 2" the ratio is ~0.89 (false merge). Line-level Jaccard treats each line as an atomic unit — "Chapter 1" != "Chapter 2" → Jaccard = 0.0 → correct split. For multi-line frames with shared persistent text (title bar) plus changing content, Jaccard captures the partial overlap naturally.
+
+**References:**
+- [ADNVideo text tracking](https://github.com/ADNVideo/ocr-processing/wiki/Text-boxes-tracking) — Levenshtein + geometric bbox matching, merged time ranges
+- [video-text-extraction](https://github.com/Akashkalakonda/video-text-extraction) — SSIM frame-level dedup (pre-OCR)
+- [FrameTextExtractor](https://github.com/zeynelacikgoez/FrameTextExtractor) — motion detection (pre-OCR)
+
+**Step 1: Write the dedup module**
+
+```python
+"""Post-OCR deduplication — merge consecutive frames with overlapping text.
+
+Uses line-level Jaccard similarity to avoid false merges on short texts
+(e.g., "Chapter 1" vs "Chapter 2" would get ~0.89 with SequenceMatcher
+but 0.0 with line-level Jaccard since the lines differ as atomic units).
+"""
+
+import logging
+
+logger = logging.getLogger(__name__)
+
+DEFAULT_SIMILARITY_THRESHOLD = 0.6
+DEFAULT_MAX_GAP_SECONDS = 30.0
+
+
+def _normalize_line(line: str) -> str:
+    """Normalize a single line: lowercase, collapse whitespace, strip."""
+    return " ".join(line.lower().split())
+
+
+def _to_line_set(text: str) -> set[str]:
+    """Split text into normalized non-empty lines."""
+    return {
+        _normalize_line(line)
+        for line in text.split("\n")
+        if line.strip()
+    }
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    """Jaccard similarity between two sets (0.0 to 1.0)."""
+    if not a and not b:
+        return 1.0
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def deduplicate_ocr_results(
+    entries: list[tuple[float, str, float]],
+    threshold: float = DEFAULT_SIMILARITY_THRESHOLD,
+    max_gap_seconds: float = DEFAULT_MAX_GAP_SECONDS,
+) -> list[dict]:
+    """Merge consecutive OCR entries with overlapping text into spans.
+
+    Args:
+        entries: List of (timestamp_s, full_text, avg_confidence) sorted by
+                 timestamp. Empty-text entries are skipped.
+        threshold: Line-level Jaccard similarity at or above which two
+                   entries are merged.
+        max_gap_seconds: Maximum time gap (seconds) between frames to allow
+                         merging. Prevents merging distant frames that happen
+                         to have similar text (e.g., recurring watermark after
+                         a long gap).
+
+    Returns:
+        List of dicts with keys: start_time, end_time, text, confidence,
+        frame_count. Sorted by start_time.
+    """
+    if not entries:
+        return []
+
+    # Filter out empty-text entries
+    entries = [(ts, text, conf) for ts, text, conf in entries if text.strip()]
+    if not entries:
+        return []
+
+    spans: list[dict] = []
+    ts, text, conf = entries[0]
+    current = {
+        "start_time": ts,
+        "end_time": ts,
+        "text": text,
+        "confidence": conf,
+        "frame_count": 1,
+        "_lines": _to_line_set(text),
+    }
+
+    for ts, text, conf in entries[1:]:
+        lines = _to_line_set(text)
+        sim = _jaccard(current["_lines"], lines)
+        gap = ts - current["end_time"]
+
+        if sim >= threshold and gap <= max_gap_seconds:
+            # Merge: extend time range, keep higher-confidence text
+            current["end_time"] = ts
+            current["frame_count"] += 1
+            if conf > current["confidence"]:
+                current["text"] = text
+                current["confidence"] = conf
+                current["_lines"] = lines
+        else:
+            # New span
+            spans.append(current)
+            current = {
+                "start_time": ts,
+                "end_time": ts,
+                "text": text,
+                "confidence": conf,
+                "frame_count": 1,
+                "_lines": lines,
+            }
+
+    spans.append(current)
+
+    # Remove internal key and return
+    for s in spans:
+        s.pop("_lines", None)
+
+    logger.info(
+        f"Dedup: {len(entries)} frames -> {len(spans)} spans "
+        f"(threshold={threshold}, max_gap={max_gap_seconds}s)"
+    )
+    return spans
+```
+
+**Step 2: Write tests**
+
+```python
+"""Tests for ocr_dedup module."""
+
+import pytest
+from ocr_dedup import deduplicate_ocr_results, _jaccard, _to_line_set, _normalize_line
+
+
+def test_empty_input():
+    """Empty list returns empty list."""
+    assert deduplicate_ocr_results([]) == []
+
+
+def test_single_entry():
+    """Single entry becomes a single span."""
+    result = deduplicate_ocr_results([(1.0, "hello world", 0.95)])
+    assert len(result) == 1
+    assert result[0]["start_time"] == 1.0
+    assert result[0]["end_time"] == 1.0
+    assert result[0]["text"] == "hello world"
+    assert result[0]["frame_count"] == 1
+
+
+def test_identical_text_merges():
+    """Identical text across frames merges into one span."""
+    entries = [
+        (1.0, "Introduction to Python", 0.90),
+        (3.0, "Introduction to Python", 0.92),
+        (5.0, "Introduction to Python", 0.88),
+    ]
+    result = deduplicate_ocr_results(entries)
+    assert len(result) == 1
+    assert result[0]["start_time"] == 1.0
+    assert result[0]["end_time"] == 5.0
+    assert result[0]["confidence"] == 0.92  # highest
+    assert result[0]["frame_count"] == 3
+
+
+def test_similar_multiline_merges():
+    """Multi-line text with shared lines merges (high Jaccard)."""
+    entries = [
+        (1.0, "Title Bar\nSlide 1: Introduction\nFooter", 0.90),
+        (3.0, "Title Bar\nSlide 1: Introduction\nFooter text", 0.85),
+    ]
+    # 2 out of 3/4 lines overlap -> Jaccard ~0.5-0.67
+    result = deduplicate_ocr_results(entries, threshold=0.5)
+    assert len(result) == 1
+    assert result[0]["confidence"] == 0.90
+
+
+def test_chapter_numbers_split():
+    """Short texts differing only in number must NOT merge.
+
+    This was the key Codex finding: SequenceMatcher("Chapter 1", "Chapter 2")
+    gives ~0.89 ratio (false merge). Line-level Jaccard gives 0.0 (correct).
+    """
+    entries = [
+        (1.0, "Chapter 1: Introduction", 0.90),
+        (10.0, "Chapter 2: Data Structures", 0.92),
+    ]
+    result = deduplicate_ocr_results(entries)
+    assert len(result) == 2
+    assert result[0]["text"] == "Chapter 1: Introduction"
+    assert result[1]["text"] == "Chapter 2: Data Structures"
+
+
+def test_mixed_merge_and_split():
+    """Three frames: first two merge, third is different."""
+    entries = [
+        (1.0, "Welcome to the course", 0.90),
+        (2.0, "Welcome to the course", 0.88),
+        (10.0, "Now let us begin", 0.95),
+    ]
+    result = deduplicate_ocr_results(entries)
+    assert len(result) == 2
+    assert result[0]["frame_count"] == 2
+    assert result[0]["end_time"] == 2.0
+    assert result[1]["start_time"] == 10.0
+
+
+def test_empty_text_entries_skipped():
+    """Entries with empty or whitespace-only text are filtered out."""
+    entries = [
+        (1.0, "", 0.0),
+        (2.0, "   ", 0.0),
+        (3.0, "Actual text", 0.90),
+    ]
+    result = deduplicate_ocr_results(entries)
+    assert len(result) == 1
+    assert result[0]["text"] == "Actual text"
+
+
+def test_max_gap_prevents_distant_merge():
+    """Similar text separated by large time gap creates separate spans."""
+    entries = [
+        (1.0, "Recurring watermark", 0.90),
+        (120.0, "Recurring watermark", 0.92),  # 119s gap
+    ]
+    result = deduplicate_ocr_results(entries, max_gap_seconds=30.0)
+    assert len(result) == 2
+
+
+def test_max_gap_allows_close_merge():
+    """Similar text within time gap merges normally."""
+    entries = [
+        (1.0, "Recurring watermark", 0.90),
+        (10.0, "Recurring watermark", 0.92),  # 9s gap
+    ]
+    result = deduplicate_ocr_results(entries, max_gap_seconds=30.0)
+    assert len(result) == 1
+
+
+def test_custom_threshold():
+    """Custom threshold changes merge sensitivity."""
+    entries = [
+        (1.0, "Line A\nLine B\nLine C", 0.90),
+        (2.0, "Line A\nLine D\nLine E", 0.85),
+    ]
+    # Jaccard = 1/5 = 0.2 (only "line a" shared)
+    # Strict threshold -> split
+    result_strict = deduplicate_ocr_results(entries, threshold=0.5)
+    assert len(result_strict) == 2
+
+    # Loose threshold -> merge
+    result_loose = deduplicate_ocr_results(entries, threshold=0.1)
+    assert len(result_loose) == 1
+
+
+def test_normalize_line():
+    """Normalization collapses whitespace and lowercases."""
+    assert _normalize_line("  Hello   World  ") == "hello world"
+    assert _normalize_line("UPPER CASE") == "upper case"
+
+
+def test_to_line_set():
+    """Splits text into normalized non-empty lines."""
+    lines = _to_line_set("Hello\n\nWorld\n  Foo  ")
+    assert lines == {"hello", "world", "foo"}
+
+
+def test_jaccard_identical():
+    """Identical sets have Jaccard 1.0."""
+    assert _jaccard({"a", "b"}, {"a", "b"}) == 1.0
+
+
+def test_jaccard_disjoint():
+    """Disjoint sets have Jaccard 0.0."""
+    assert _jaccard({"a", "b"}, {"c", "d"}) == 0.0
+
+
+def test_jaccard_empty():
+    """Two empty sets have Jaccard 1.0, one empty has 0.0."""
+    assert _jaccard(set(), set()) == 1.0
+    assert _jaccard({"a"}, set()) == 0.0
+    assert _jaccard(set(), {"a"}) == 0.0
+```
+
+**Step 3: Run tests**
+
+```bash
+cd /home/amlucas/dev/yt-llm-service
+PYTHONPATH=src:tests/stubs:. uv run pytest tests/test_ocr_dedup.py -v
+```
+
+Expected: All 15 tests PASS.
+
+**Step 4: Commit**
+
+```bash
+git add src/ocr_dedup.py tests/test_ocr_dedup.py
+git commit -m "feat: add post-OCR text deduplication (line-level Jaccard merge)"
+```
+
+---
+
+### Task 8: Add OCR endpoints to run_llm_api.py
+
+> **Codex review finding:** `AudioDownloader.download_audio()` returns `audio_path` only, not `video_path`. The `/ocr-youtube` endpoint must download video separately using yt-dlp with a unique temp filename to avoid concurrency collisions.
 
 **Files:**
 - Modify: `src/run_llm_api.py`
@@ -708,6 +1024,7 @@ Near the top of `run_llm_api.py`, alongside existing service imports:
 ```python
 from frame_extractor import extract_scene_frames, cleanup_frames
 from ocr_client import OCRClient
+from ocr_dedup import deduplicate_ocr_results
 ```
 
 In the initialization section (where `notes_service` is created):
@@ -731,17 +1048,19 @@ class YouTubeOCRRequest(BaseModel):
     lang: str = "en"
 
 
-class FrameOCR(BaseModel):
-    timestamp_s: float
+class OCRSpan(BaseModel):
+    start_time: float
+    end_time: float
     text: str
     confidence: float
-    frame_index: int
+    frame_count: int
 
 
 class OCRResponse(BaseModel):
     success: bool
-    frames: list[FrameOCR]
-    total_frames: int
+    spans: list[OCRSpan]
+    total_spans: int
+    total_frames_processed: int
     processing_time_ms: float
     video_metadata: Optional[dict] = None
     error: Optional[str] = None
@@ -756,33 +1075,36 @@ async def ocr_youtube(request: YouTubeOCRRequest):
     start = time.perf_counter()
     logger.info(f"OCR request for YouTube URL: {request.youtube_url}")
 
+    video_path = None
+    frames = []
     try:
-        # Download video
-        download_result = audio_downloader.download_audio(request.youtube_url)
-        video_context = download_result.get("video_context")
+        # Extract video_id and metadata via AudioDownloader (for VideoContext)
+        video_id = audio_downloader._extract_video_id(request.youtube_url)
+        video_context = audio_downloader.get_video_context(request.youtube_url)
 
-        # Find the video file (yt-dlp downloads to temp dir)
-        video_path = download_result.get("video_path")
-        if not video_path:
-            # Fallback: download video separately
-            import subprocess
-            video_path = str(Path(config.TEMP_DIR) / "ocr_video.mp4")
-            subprocess.run([
-                "yt-dlp", "-f", "bestvideo[height<=1080][ext=mp4]/best[height<=1080]",
-                "--merge-output-format", "mp4",
-                "-o", video_path, request.youtube_url,
-            ], capture_output=True, timeout=120)
+        # Download video to a unique temp file (AudioDownloader only returns
+        # audio_path, so we download video separately for frame extraction)
+        import subprocess
+        import uuid
+        video_path = Path(config.TEMP_DIR) / f"ocr_{video_id}_{uuid.uuid4().hex[:8]}.mp4"
+        dl_result = subprocess.run([
+            "yt-dlp", "-f", "bestvideo[height<=1080][ext=mp4]/best[height<=1080]",
+            "--merge-output-format", "mp4",
+            "-o", str(video_path), request.youtube_url,
+        ], capture_output=True, text=True, timeout=120)
+        if dl_result.returncode != 0:
+            raise RuntimeError(f"yt-dlp failed: {dl_result.stderr[:200]}")
 
         # Extract frames
         frames = extract_scene_frames(
-            video_path,
+            str(video_path),
             scene_threshold=request.scene_threshold,
             max_frames=request.max_frames,
         )
 
         if not frames:
             return OCRResponse(
-                success=True, frames=[], total_frames=0,
+                success=True, spans=[], total_spans=0, total_frames_processed=0,
                 processing_time_ms=(time.perf_counter() - start) * 1000,
                 video_metadata=_video_context_to_dict(video_context) if video_context else None,
             )
@@ -792,30 +1114,25 @@ async def ocr_youtube(request: YouTubeOCRRequest):
         ocr_result = await ocr_client.ocr_images(image_paths, lang=request.lang)
 
         if ocr_result is None:
-            cleanup_frames(frames)
             return OCRResponse(
-                success=False, frames=[], total_frames=0,
+                success=False, spans=[], total_spans=0, total_frames_processed=0,
                 processing_time_ms=(time.perf_counter() - start) * 1000,
                 error="ocr-service unavailable",
             )
 
-        # Combine frame timestamps with OCR results
-        frame_ocrs = []
-        for frame, ocr_frame in zip(frames, ocr_result.results):
-            frame_ocrs.append(FrameOCR(
-                timestamp_s=frame.timestamp_s,
-                text=ocr_frame.full_text,
-                confidence=ocr_frame.avg_confidence,
-                frame_index=frame.index,
-            ))
-
-        cleanup_frames(frames)
+        # Combine frame timestamps with OCR results, then deduplicate
+        raw_entries = [
+            (frame.timestamp_s, ocr_frame.full_text, ocr_frame.avg_confidence)
+            for frame, ocr_frame in zip(frames, ocr_result.results)
+        ]
+        spans = deduplicate_ocr_results(raw_entries)
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         return OCRResponse(
             success=True,
-            frames=frame_ocrs,
-            total_frames=len(frame_ocrs),
+            spans=[OCRSpan(**s) for s in spans],
+            total_spans=len(spans),
+            total_frames_processed=len(frames),
             processing_time_ms=elapsed_ms,
             video_metadata=_video_context_to_dict(video_context) if video_context else None,
         )
@@ -823,10 +1140,16 @@ async def ocr_youtube(request: YouTubeOCRRequest):
     except Exception as e:
         logger.error(f"OCR YouTube error: {e}")
         return OCRResponse(
-            success=False, frames=[], total_frames=0,
+            success=False, spans=[], total_spans=0, total_frames_processed=0,
             processing_time_ms=(time.perf_counter() - start) * 1000,
             error=str(e),
         )
+    finally:
+        # Always clean up temp files
+        if frames:
+            cleanup_frames(frames)
+        if video_path and Path(video_path).exists():
+            Path(video_path).unlink(missing_ok=True)
 
 
 def _video_context_to_dict(ctx) -> dict:
@@ -854,9 +1177,13 @@ async def ocr_file(
     start = time.perf_counter()
     logger.info(f"OCR request for uploaded file: {file.filename}")
 
+    upload_path = None
+    frames = []
     try:
-        # Save uploaded file
-        upload_path = Path(config.TEMP_DIR) / f"ocr_upload_{file.filename}"
+        # Save uploaded file with unique name
+        import uuid
+        safe_name = Path(file.filename).stem[:50]
+        upload_path = Path(config.TEMP_DIR) / f"ocr_upload_{safe_name}_{uuid.uuid4().hex[:8]}.mp4"
         with open(upload_path, "wb") as f:
             content = await file.read()
             f.write(content)
@@ -869,9 +1196,8 @@ async def ocr_file(
         )
 
         if not frames:
-            upload_path.unlink(missing_ok=True)
             return OCRResponse(
-                success=True, frames=[], total_frames=0,
+                success=True, spans=[], total_spans=0, total_frames_processed=0,
                 processing_time_ms=(time.perf_counter() - start) * 1000,
             )
 
@@ -879,53 +1205,56 @@ async def ocr_file(
         image_paths = [f.path for f in frames]
         ocr_result = await ocr_client.ocr_images(image_paths, lang=lang)
 
-        cleanup_frames(frames)
-        upload_path.unlink(missing_ok=True)
+        total_frames = len(frames)
 
         if ocr_result is None:
             return OCRResponse(
-                success=False, frames=[], total_frames=0,
+                success=False, spans=[], total_spans=0, total_frames_processed=0,
                 processing_time_ms=(time.perf_counter() - start) * 1000,
                 error="ocr-service unavailable",
             )
 
-        frame_ocrs = [
-            FrameOCR(
-                timestamp_s=frame.timestamp_s,
-                text=ocr_frame.full_text,
-                confidence=ocr_frame.avg_confidence,
-                frame_index=frame.index,
-            )
+        # Combine and deduplicate
+        raw_entries = [
+            (frame.timestamp_s, ocr_frame.full_text, ocr_frame.avg_confidence)
             for frame, ocr_frame in zip(frames, ocr_result.results)
         ]
+        spans = deduplicate_ocr_results(raw_entries)
 
         elapsed_ms = (time.perf_counter() - start) * 1000
         return OCRResponse(
             success=True,
-            frames=frame_ocrs,
-            total_frames=len(frame_ocrs),
+            spans=[OCRSpan(**s) for s in spans],
+            total_spans=len(spans),
+            total_frames_processed=total_frames,
             processing_time_ms=elapsed_ms,
         )
 
     except Exception as e:
         logger.error(f"OCR file error: {e}")
         return OCRResponse(
-            success=False, frames=[], total_frames=0,
+            success=False, spans=[], total_spans=0, total_frames_processed=0,
             processing_time_ms=(time.perf_counter() - start) * 1000,
             error=str(e),
         )
+    finally:
+        # Always clean up temp files
+        if frames:
+            cleanup_frames(frames)
+        if upload_path and upload_path.exists():
+            upload_path.unlink(missing_ok=True)
 ```
 
 **Step 5: Commit**
 
 ```bash
 git add src/run_llm_api.py
-git commit -m "feat: add /ocr-youtube and /ocr-file endpoints"
+git commit -m "feat: add /ocr-youtube and /ocr-file endpoints with dedup"
 ```
 
 ---
 
-### Task 8: Integration test — build and run end-to-end
+### Task 9: Integration test — build and run end-to-end
 
 **Step 1: Build all services**
 
@@ -948,7 +1277,7 @@ curl -X POST http://localhost:8002/ocr-youtube \
   | python3 -m json.tool | head -40
 ```
 
-Expected: JSON with `success: true`, `frames` array with `text`, `confidence`, `timestamp_s` per frame.
+Expected: JSON with `success: true`, `spans` array with `start_time`, `end_time`, `text`, `confidence`, `frame_count` per span. Repeated text across consecutive frames should be merged into single spans.
 
 **Step 3: Test with file upload**
 
@@ -978,8 +1307,10 @@ git commit -m "fix: integration adjustments for OCR endpoints"
 | `ocr-service/app.py` | FastAPI sidecar (POST /ocr, GET /health) |
 | `src/frame_extractor.py` | ffmpeg scene change detection |
 | `src/ocr_client.py` | Async HTTP client for OCR sidecar |
+| `src/ocr_dedup.py` | Post-OCR line-level Jaccard deduplication |
 | `src/config.py` | OCR env var config (modified) |
 | `src/run_llm_api.py` | /ocr-youtube, /ocr-file endpoints (modified) |
 | `docker-compose.yml` | ocr-service added (modified) |
 | `tests/test_frame_extractor.py` | Frame extraction unit tests |
 | `tests/test_ocr_client.py` | OCR client unit tests |
+| `tests/test_ocr_dedup.py` | Deduplication unit tests (15 tests) |

@@ -631,18 +631,37 @@ git commit -m "fix: <description of any fixups>"
 
 ---
 
-## Cleanup: Remove now-dead methods (optional, after all tests pass)
+## Task 6: Remove now-dead methods (required)
 
-`_extract_video_title()` and `fetch_captions()` are now fully replaced by
-`get_video_context()`. They can be removed from `audio_downloader.py`.
+`_extract_video_title()` and `fetch_captions()` are superseded by `get_video_context()`.
+Both contain a broken `impersonate` fallback (`yt_dlp.YoutubeDL` crashes with
+`AssertionError` on the `impersonate` option in yt-dlp 2026.02.21). Dead code with a
+known runtime bug must be removed, not left around.
 
-Check no other callers exist first:
+**Step 1: Verify no callers remain outside the class itself**
 
 ```bash
-grep -r "_extract_video_title\|fetch_captions" src/
+grep -rn "_extract_video_title\|fetch_captions" src/
 ```
 
-If only defined, not called from outside:
+Expected: only the method definitions themselves — no external call sites.
+If any external caller appears, update it before removing.
+
+**Step 2: Remove both methods from `src/audio_downloader.py`**
+
+Delete:
+- `_extract_video_title()` (lines ~63–106)
+- `fetch_captions()` (lines ~108–162)
+
+**Step 3: Run full test suite to confirm nothing breaks**
+
+```bash
+python -m pytest tests/ -v
+```
+
+Expected: all PASS.
+
+**Step 4: Commit**
 
 ```bash
 git add src/audio_downloader.py
