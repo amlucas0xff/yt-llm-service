@@ -22,6 +22,14 @@ services:
       - ${HOST_OUTPUT_DIR:-./data/output}:/app/output
       - ./data/logs:/app/logs
       - ./data/uploads:/app/uploads
+      # Obsidian integration config. Without this mount the service looks for
+      # ~/.config/yt-llm/config.toml inside the container, never finds it, and
+      # silently disables the vault export no matter what the host config says.
+      - ${HOST_YT_LLM_CONFIG:-~/.config/yt-llm}:/home/app/.config/yt-llm:ro
+      # The vault is mounted at the SAME absolute path it has on the host,
+      # because vault_path in config.toml is resolved inside the container.
+      # Keeping the two identical means one path is correct on both sides.
+      - ${HOST_OBSIDIAN_VAULT:-/tmp/no-vault}:${HOST_OBSIDIAN_VAULT:-/tmp/no-vault}
       # Optional browser data volumes for YouTube cookie authentication
       # Uncomment and modify paths as needed for your system
       - ${HOST_FIREFOX_DIR:-~/.mozilla/firefox}:/home/app/.mozilla/firefox:ro
@@ -35,6 +43,9 @@ services:
       - TEMP_DIR=/app/tmp
       - OUTPUT_DIR=/app/output
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # Lets the service translate /app/output paths back to host paths
+      # when recording provenance in Obsidian notes.
+      - HOST_OUTPUT_DIR=${HOST_OUTPUT_DIR:-./data/output}
       - TF_CPP_MIN_LOG_LEVEL=2
       - CUDA_VISIBLE_DEVICES=0
       - TF_FORCE_GPU_ALLOW_GROWTH=true

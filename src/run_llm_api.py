@@ -190,10 +190,12 @@ async def generate_and_persist_notes(
         logger.info(f"Notes saved to: {notes_path}")
 
         if obsidian_service:
+            # The note is read on the host, so the provenance path must be a
+            # host path — the container's /app/output means nothing there.
             obsidian_service.save_note(
                 notes_result.text,
                 source_url=source_url,
-                source_transcript=saved_path,
+                source_transcript=config.to_host_path(saved_path),
                 truncated=notes_result.truncated,
             )
         return notes_result.text

@@ -25,6 +25,11 @@ class Config:
         self.TEMP_DIR = Path(os.getenv("TEMP_DIR", "/app/tmp"))
         self.OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", "/app/output"))
         
+        # Where OUTPUT_DIR is mounted from on the host. Set by docker-compose.
+        # The service only ever sees container paths, but anything it writes
+        # into an Obsidian vault is read on the host — see to_host_path().
+        self.HOST_OUTPUT_DIR = os.getenv("HOST_OUTPUT_DIR")
+
         # Logging
         self.LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
@@ -48,6 +53,29 @@ class Config:
         self.TEMP_DIR.mkdir(parents=True, exist_ok=True)
         self.OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     
+    def to_host_path(self, container_path: Optional[str]) -> Optional[str]:
+        """
+        Rewrite a path under OUTPUT_DIR to the equivalent path on the host.
+
+        Notes exported to an Obsidian vault are read by a human on the host,
+        where the container's /app/output does not exist. Without this the
+        recorded provenance points at nothing.
+
+        Returns the path unchanged when no host mapping is configured or the
+        path lies outside OUTPUT_DIR — never guesses.
+        """
+        if not container_path or not self.HOST_OUTPUT_DIR:
+            return container_path
+
+        container_root = str(self.OUTPUT_DIR).rstrip("/")
+        if container_path == container_root:
+            return self.HOST_OUTPUT_DIR.rstrip("/")
+        if not container_path.startswith(container_root + "/"):
+            return container_path
+
+        relative = container_path[len(container_root) + 1:]
+        return f"{self.HOST_OUTPUT_DIR.rstrip('/')}/{relative}"
+
     def __str__(self) -> str:
         """String representation hiding sensitive data"""
         return f"Config(DEVICE={self.DEVICE}, WHISPER_MODEL={self.WHISPER_MODEL}, BATCH_SIZE={self.BATCH_SIZE}, LLM_OUTPUT_FORMAT={self.LLM_OUTPUT_FORMAT}, LLAMA_CPP_URL={self.LLAMA_CPP_URL})"
