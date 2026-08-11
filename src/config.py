@@ -39,12 +39,6 @@ class Config:
         # LLAMA_CPP_GPU_LAYERS is consumed by docker-compose, stored here for logging only
         self.LLAMA_CPP_GPU_LAYERS = int(os.getenv("LLAMA_CPP_GPU_LAYERS", "99"))
 
-        # OCR service configuration
-        self.OCR_SERVICE_URL = os.getenv("OCR_SERVICE_URL", "http://ocr-service:8003")
-        self.OCR_SERVICE_TIMEOUT = float(os.getenv("OCR_SERVICE_TIMEOUT", "60"))
-        self.OCR_SCENE_THRESHOLD = float(os.getenv("OCR_SCENE_THRESHOLD", "0.3"))
-        self.OCR_MAX_FRAMES = int(os.getenv("OCR_MAX_FRAMES", "100"))
-
         # Validate LLM output format
         valid_formats = ["simple", "speaker", "structured", "markdown"]
         if self.LLM_OUTPUT_FORMAT not in valid_formats:

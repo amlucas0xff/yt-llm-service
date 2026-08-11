@@ -21,22 +21,20 @@ A high-performance FastAPI service for YouTube audio transcription with advanced
 - **Filler Word Removal**: Intelligent removal of "um", "uh", and other speech disfluencies
 - **Speaker Merging**: Automatic merging of consecutive segments from the same speaker
 - **Batch Processing**: Configurable batch sizes for optimal performance
-- **Video OCR (PaddleOCR)**: Extract text from video frames using scene-change detection and PaddleOCR v3, with automatic deduplication of repeated text across frames. Available for YouTube URLs (`/ocr-youtube`) and file uploads (`/ocr-file`).
 - **VRAM Idle Unload**: llama-cpp automatically unloads the model after idle timeout, reclaiming GPU memory on shared hardware
 - **RESTful API**: Complete FastAPI implementation with automatic OpenAPI documentation
 - **Docker Support**: Containerized deployment with GPU passthrough
 
 ## Architecture
 
-Three Docker services, GPU-isolated:
+Two Docker services, GPU-isolated:
 
 | Service | Port | GPU | Model | Role |
 |---------|------|-----|-------|------|
-| `yt-llm-service` | 8002 | GPU 0 (RTX 4060, 8GB) | WhisperX large-v3-turbo | Transcription + speaker diarization + OCR orchestration |
+| `yt-llm-service` | 8002 | GPU 0 (RTX 4060, 8GB) | WhisperX large-v3-turbo | Transcription + speaker diarization |
 | `llama-cpp` | 8080 | GPU 1 (RTX 3090 Ti, 24GB) | gpt-oss-20b MXFP4 | Structured notes generation |
-| `ocr-service` | 8003 | GPU 1 (RTX 3090 Ti, 24GB) | PaddleOCR v3 (PP-OCRv5) | Video frame text extraction |
 
-`yt-llm-service` depends on `llama-cpp` (Docker healthcheck enforced). `ocr-service` is independent -- OCR endpoints return errors gracefully if the sidecar is unavailable. Notes generation is non-fatal — if llama-cpp is unavailable, transcription still succeeds and `notes` returns `null`.
+`yt-llm-service` depends on `llama-cpp` (Docker healthcheck enforced). Notes generation is non-fatal — if llama-cpp is unavailable, transcription still succeeds and `notes` returns `null`.
 
 ### YouTube URL Pipeline
 
@@ -209,65 +207,7 @@ POST /transcribe-llm
 
 Transcribe a file already on the server by path. Same request shape as YouTube but with `audio_file_path` instead of `youtube_url`.
 
-#### 4. YouTube Video OCR
-```bash
-POST /ocr-youtube
-```
-
-Extract text from YouTube video frames using scene-change detection and PaddleOCR. Frames are deduplicated using line-level Jaccard similarity to merge repeated text across consecutive scenes.
-
-**Request fields:**
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `youtube_url` | string | required | YouTube URL |
-| `scene_threshold` | float | `0.3` | ffmpeg scene change sensitivity (0.0-1.0, lower = more frames) |
-| `max_frames` | int | `100` | Maximum frames to extract |
-| `lang` | string | `en` | OCR language |
-
-```bash
-curl -X POST http://localhost:8002/ocr-youtube \
-  -H "Content-Type: application/json" \
-  -d '{"youtube_url": "https://youtu.be/MW3t6jP9AOs", "max_frames": 10}'
-```
-
-**Example response:**
-```json
-{
-  "success": true,
-  "spans": [
-    {
-      "start_time": 3.2,
-      "end_time": 3.2,
-      "text": "CLAUDE.md - SuperDesign Platform Documentation\n...",
-      "confidence": 0.93,
-      "frame_count": 1
-    }
-  ],
-  "total_spans": 5,
-  "total_frames_processed": 5,
-  "processing_time_ms": 19532.97,
-  "video_metadata": {
-    "video_id": "MW3t6jP9AOs",
-    "title": ".agent folder is making claude code 10x better...",
-    "channel": "AI Jason"
-  }
-}
-```
-
-#### 5. File Upload OCR
-```bash
-POST /ocr-file
-```
-
-Multipart form upload for video file OCR. Same scene detection and dedup pipeline as `/ocr-youtube`.
-
-```bash
-curl -X POST http://localhost:8002/ocr-file \
-  -F "file=@video.mp4" \
-  -F "max_frames=10"
-```
-
-#### 6. Health Check
+#### 4. Health Check
 ```bash
 GET /health
 ```
@@ -297,10 +237,6 @@ Returns service status and GPU information.
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 | `LLAMA_CPP_URL` | `http://llama-cpp:8080` | URL of the llama-cpp sidecar |
 | `NOTES_MAX_TOKENS` | `80000` | Max transcript tokens before middle truncation |
-| `OCR_SERVICE_URL` | `http://ocr-service:8003` | URL of the OCR sidecar |
-| `OCR_SERVICE_TIMEOUT` | `60` | OCR request timeout (seconds) |
-| `OCR_SCENE_THRESHOLD` | `0.3` | ffmpeg scene detection threshold |
-| `OCR_MAX_FRAMES` | `100` | Maximum frames to extract per video |
 
 **llama-cpp sidecar:**
 
@@ -371,14 +307,8 @@ yt-llm-service/
 │   ├── notes_service.py         # Notes generation via llama-cpp
 │   ├── audio_downloader.py      # YouTube/file audio extraction
 │   ├── storage_service.py       # Result persistence (transcription + notes)
-│   ├── frame_extractor.py       # ffmpeg scene-change frame extraction
-│   ├── ocr_client.py            # Async HTTP client for OCR sidecar
-│   ├── ocr_dedup.py             # Post-OCR line-level Jaccard deduplication
+│   ├── obsidian_service.py      # Obsidian vault export
 │   └── config.py                # Configuration (env vars)
-├── ocr-service/                 # PaddleOCR sidecar service
-│   ├── Dockerfile               # PyTorch CUDA + PaddleOCR container
-│   ├── app.py                   # FastAPI app (POST /ocr, GET /health)
-│   └── requirements.txt         # Sidecar Python dependencies
 ├── llama-cpp/                   # llama-cpp sidecar service
 │   ├── Dockerfile               # Builds on official llama.cpp CUDA image
 │   └── entrypoint.sh            # Downloads model + starts llama-server
@@ -400,7 +330,6 @@ yt-llm-service/
 This service is designed for two NVIDIA GPUs. The `docker-compose.yml` pins each service to a specific GPU index:
 - `yt-llm-service` uses `count: 1` (defaults to GPU 0)
 - `llama-cpp` uses `device_ids: ['1']` (explicitly GPU 1)
-- `ocr-service` uses `device_ids: ['1']` (shares GPU 1 with llama-cpp; PaddleOCR uses ~1.5GB VRAM)
 
 If your GPU layout differs from the default, edit `docker-compose.yml` accordingly and verify with:
 ```bash
