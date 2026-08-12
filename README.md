@@ -105,14 +105,22 @@ nano .env  # or vim, code, etc.
 # Set: HF_TOKEN=your_token_here
 ```
 
-3. **Start the service**
+3. **Download the notes model** (~12GB, once per machine)
+```bash
+curl -L -o models/openai_gpt-oss-20b-MXFP4.gguf \
+  "https://huggingface.co/bartowski/openai_gpt-oss-20b-GGUF/resolve/main/openai_gpt-oss-20b-MXFP4.gguf"
+```
+
+`models/` is mounted into the sidecar, so the file survives image rebuilds. No HuggingFace token is needed for this one. This step is not optional: `llama-cpp` exits with instructions if the file is missing, and `yt-llm-service` waits on its healthcheck, so the whole stack stays down until the model is in place.
+
+4. **Start the service**
 ```bash
 docker-compose up --build
 ```
 
 The service will be available at `http://localhost:8002`
 
-**First run:** Docker will download ML models (~2-3GB). This may take several minutes.
+**First run:** Docker will download the WhisperX models (~2-3GB). This may take several minutes.
 
 ### Quick Test
 
@@ -247,7 +255,6 @@ Returns service status and GPU information.
 | `LLAMA_CPP_GPU_LAYERS` | `99` | GPU layers to offload (99 = all) |
 | `LLAMA_CPP_IDLE_SECONDS` | `300` | Seconds idle before VRAM unload (-1 to disable) |
 | `LLAMA_CPP_HOST_PORT` | `18080` | Host port for reaching the sidecar directly |
-| `HF_TOKEN` | - | HuggingFace token for model download on first run |
 
 See `.env.example` for complete configuration options.
 
@@ -367,9 +374,9 @@ yt-llm-service/
 │   ├── obsidian_service.py      # Obsidian vault export
 │   └── config.py                # Configuration (env vars)
 ├── llama-cpp/                   # llama-cpp sidecar service
-│   ├── Dockerfile               # Builds on official llama.cpp CUDA image
-│   └── entrypoint.sh            # Downloads model + starts llama-server
-├── models/                      # GGUF model files (gitignored)
+│   ├── Dockerfile               # Pinned llama.cpp CUDA image + curl
+│   └── entrypoint.sh            # Checks for the model, starts llama-server
+├── models/                      # GGUF model files (gitignored, see Quick Start)
 ├── data/                        # Runtime data (gitignored)
 │   ├── output/                  # Saved transcriptions + notes.md
 │   ├── tmp/                     # Temporary audio files

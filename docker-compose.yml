@@ -75,8 +75,6 @@ services:
     environment:
       - LLAMA_CPP_GPU_LAYERS=${LLAMA_CPP_GPU_LAYERS:-99}
       - LLAMA_CPP_IDLE_SECONDS=${LLAMA_CPP_IDLE_SECONDS:-300}
-      - HF_TOKEN=${HF_TOKEN:-}
-      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     deploy:
       resources:
         reservations:
