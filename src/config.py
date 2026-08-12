@@ -61,11 +61,19 @@ class Config:
         where the container's /app/output does not exist. Without this the
         recorded provenance points at nothing.
 
-        Returns the path unchanged when no host mapping is configured or the
-        path lies outside OUTPUT_DIR — never guesses.
+        Returns None when no usable host mapping exists — HOST_OUTPUT_DIR
+        unset, or set to a relative path like docker-compose's ./data/output
+        default. The caller omits the field entirely in that case, which is
+        the honest answer: a path the reader cannot open is worse than no
+        path, because it still looks like provenance. Never guesses.
+
+        A path outside OUTPUT_DIR is returned unchanged — it is not this
+        mapping's to translate.
         """
-        if not container_path or not self.HOST_OUTPUT_DIR:
-            return container_path
+        if not container_path:
+            return None
+        if not self.HOST_OUTPUT_DIR or not os.path.isabs(self.HOST_OUTPUT_DIR):
+            return None
 
         container_root = str(self.OUTPUT_DIR).rstrip("/")
         if container_path == container_root:
