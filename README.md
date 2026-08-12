@@ -248,6 +248,14 @@ Returns service status and GPU information.
 | `LLAMA_CPP_URL` | `http://llama-cpp:8080` | URL of the llama-cpp sidecar |
 | `NOTES_MAX_TOKENS` | `80000` | Max transcript tokens before middle truncation |
 
+**Host paths** (read by `docker-compose.yml`, not by the service):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOST_OUTPUT_DIR` | `./data/output` | Host directory mounted as `/app/output`. **Set an absolute path** — provenance links in vault notes are omitted when this is relative, since a relative path resolves only inside the repo |
+| `HOST_OBSIDIAN_VAULT` | `/tmp/no-vault` | Absolute path to your Obsidian vault. Must equal `vault_path` in `config.toml`; the export silently does nothing if unset |
+| `HOST_YT_LLM_CONFIG` | `~/.config/yt-llm` | Directory holding `config.toml` |
+
 **llama-cpp sidecar:**
 
 | Variable | Default | Description |
@@ -295,28 +303,37 @@ Generated notes can be automatically mirrored to your Obsidian vault.
    mkdir -p ~/.config/yt-llm
    cp config.example.toml ~/.config/yt-llm/config.toml
    ```
-2. Edit `~/.config/yt-llm/config.toml`:
+2. Edit `~/.config/yt-llm/config.toml`. Use an **absolute** `vault_path` — it is resolved inside the container, and `~` there is not your home directory:
    ```toml
    [obsidian]
    enabled = true
-   vault_path = "~/Documents/obsidian"   # path to your vault
-   inbox_dir = "Inbox"                    # subdirectory inside vault
+   vault_path = "/home/you/Documents/obsidian"   # absolute path to your vault
+   inbox_dir = "Inbox"                            # subdirectory inside vault
    tags = ["video-notes"]
    ```
-3. Run `transcribe` as usual — if notes are generated, they are also saved to `{vault_path}/{inbox_dir}/{Title}.md` with YAML frontmatter:
+3. Point the container at the same vault, in `.env`:
+   ```bash
+   HOST_OBSIDIAN_VAULT=/home/you/Documents/obsidian   # must equal vault_path above
+   ```
+
+   This is the step that makes the export work at all. The vault is bind-mounted at the *same absolute path* it has on the host, so `vault_path` is valid on both sides. Leave `HOST_OBSIDIAN_VAULT` unset and the mount falls back to `/tmp/no-vault`, `vault_path` does not exist in the container, and `save_note()` silently does nothing. Set `HOST_YT_LLM_CONFIG` too if `config.toml` lives outside `~/.config/yt-llm`.
+
+   For provenance links to be followable, `HOST_OUTPUT_DIR` must also be absolute — see [Environment Variables](#environment-variables).
+
+4. Restart the stack (`docker compose up -d`) so the new mounts take effect, then run `transcribe` as usual. Notes are saved to `{vault_path}/{inbox_dir}/{Title}.md` with YAML frontmatter:
 
    ```yaml
    ---
    date: 2026-08-11
    source: https://youtu.be/abc123
-   source_transcript: /app/output/Understanding Transformers/transcription_1.md
+   source_transcript: '/home/you/Documents/obsidian/transcripts/Understanding Transformers/transcription_1.md'
    truncated: false
    tags:
      - video-notes
    ---
    ```
 
-   `source_transcript` points back at the transcript the notes were made from. `truncated: true` means the transcript exceeded `NOTES_MAX_TOKENS` and its middle was dropped before the model saw it — the notes then cover only the beginning and end.
+   `source_transcript` points back at the transcript the notes were made from, translated to its **host** path so it opens from the vault, and quoted so a path containing `: ` cannot break the frontmatter. If `HOST_OUTPUT_DIR` is unset or relative, the field is omitted rather than filled with a path that would not resolve. `truncated: true` means the transcript exceeded `NOTES_MAX_TOKENS` and its middle was dropped before the model saw it — the notes then cover only the beginning and end.
 
 The integration is silent: if the config file is absent or `enabled = false`, nothing changes.
 
@@ -376,7 +393,7 @@ yt-llm-service/
 │   ├── obsidian_service.py      # Obsidian vault export
 │   └── config.py                # Configuration (env vars)
 ├── llama-cpp/                   # llama-cpp sidecar service
-│   ├── Dockerfile               # Pinned llama.cpp CUDA image + curl
+│   ├── Dockerfile               # Pinned llama.cpp CUDA image (digest-locked)
 │   └── entrypoint.sh            # Checks for the model, starts llama-server
 ├── models/                      # GGUF model files (gitignored, see Quick Start)
 ├── data/                        # Runtime data (gitignored)
