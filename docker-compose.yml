@@ -61,7 +61,7 @@ services:
   llama-cpp:
     build: ./llama-cpp
     container_name: llama-cpp
-    restart: "no"
+    restart: unless-stopped
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
     ports:
       # yt-llm-service reaches llama-cpp over the compose network
