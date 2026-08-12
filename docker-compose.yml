@@ -64,7 +64,11 @@ services:
     restart: "no"
     entrypoint: ["/bin/bash", "/entrypoint.sh"]
     ports:
-      - "8080:8080"
+      # yt-llm-service reaches llama-cpp over the compose network
+      # (http://llama-cpp:8080), so this host binding exists only for poking at
+      # the sidecar by hand. It defaults off 8080 because that port is commonly
+      # already taken; set LLAMA_CPP_HOST_PORT to move it.
+      - "${LLAMA_CPP_HOST_PORT:-18080}:8080"
     volumes:
       - ./llama-cpp/entrypoint.sh:/entrypoint.sh:ro
       - ./models:/models
@@ -77,8 +81,13 @@ services:
       resources:
         reservations:
           devices:
+            # Both services share GPU 0. gpt-oss-20b MXFP4 (~12GB) and WhisperX
+            # large-v3-turbo coexist on a single 24GB card, and llama-cpp
+            # unloads after LLAMA_CPP_IDLE_SECONDS anyway. To split them across
+            # two GPUs, pin this to ['1'] in a docker-compose.override.yml —
+            # see "GPU Setup" in README.md.
             - driver: nvidia
-              device_ids: ['1']
+              device_ids: ['0']
               capabilities: [gpu]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/health"]

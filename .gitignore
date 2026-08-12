@@ -31,6 +31,8 @@ data/logs/*
 *.log
 .docker/
 logs/
+# Machine-local compose deviations (GPU pinning, host ports) — see README
+docker-compose.override.yml
 
 # Security & Authentication
 cookies.txt

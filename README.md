@@ -2,8 +2,8 @@
 
 A high-performance FastAPI service for YouTube audio transcription with advanced speaker diarization, LLM-optimized output formatting, and automated structured notes generation via a local LLM sidecar.
 
-> **IMPORTANT: Dual GPU recommended**
-> The service is designed for two NVIDIA GPUs: WhisperX runs on GPU 0 (8GB+ VRAM) and the llama-cpp notes sidecar runs on GPU 1 (24GB+ VRAM). Single-GPU setups and CPU fallback are possible but not recommended for production use.
+> **IMPORTANT: NVIDIA GPU required**
+> Both services share one GPU by default: WhisperX and the gpt-oss-20b notes sidecar together want ~20GB of VRAM, so a 24GB card is the comfortable target. Splitting them across two GPUs is supported — see [GPU Setup](#gpu-setup). CPU fallback works but is not recommended for production use.
 
 ## Features
 
@@ -27,14 +27,16 @@ A high-performance FastAPI service for YouTube audio transcription with advanced
 
 ## Architecture
 
-Two Docker services, GPU-isolated:
+Two Docker services, both on GPU 0:
 
-| Service | Port | GPU | Model | Role |
-|---------|------|-----|-------|------|
-| `yt-llm-service` | 8002 | GPU 0 (RTX 4060, 8GB) | WhisperX large-v3-turbo | Transcription + speaker diarization |
-| `llama-cpp` | 8080 | GPU 1 (RTX 3090 Ti, 24GB) | gpt-oss-20b MXFP4 | Structured notes generation |
+| Service | Host port | GPU | Model | Role |
+|---------|-----------|-----|-------|------|
+| `yt-llm-service` | 8002 | GPU 0 | WhisperX large-v3-turbo | Transcription + speaker diarization |
+| `llama-cpp` | 18080 | GPU 0 | gpt-oss-20b MXFP4 | Structured notes generation |
 
 `yt-llm-service` depends on `llama-cpp` (Docker healthcheck enforced). Notes generation is non-fatal — if llama-cpp is unavailable, transcription still succeeds and `notes` returns `null`.
+
+The two models coexist on one 24GB card because llama-cpp unloads gpt-oss-20b from VRAM after `LLAMA_CPP_IDLE_SECONDS`. `llama-cpp`'s host port is only for hitting the sidecar by hand — `yt-llm-service` talks to it over the compose network at `http://llama-cpp:8080`.
 
 ### YouTube URL Pipeline
 
@@ -244,6 +246,7 @@ Returns service status and GPU information.
 |----------|---------|-------------|
 | `LLAMA_CPP_GPU_LAYERS` | `99` | GPU layers to offload (99 = all) |
 | `LLAMA_CPP_IDLE_SECONDS` | `300` | Seconds idle before VRAM unload (-1 to disable) |
+| `LLAMA_CPP_HOST_PORT` | `18080` | Host port for reaching the sidecar directly |
 | `HF_TOKEN` | - | HuggingFace token for model download on first run |
 
 See `.env.example` for complete configuration options.
@@ -386,14 +389,34 @@ yt-llm-service/
 
 ## GPU Setup
 
-This service is designed for two NVIDIA GPUs. The `docker-compose.yml` pins each service to a specific GPU index:
+`docker-compose.yml` puts both services on GPU 0:
 - `yt-llm-service` uses `count: 1` (defaults to GPU 0)
-- `llama-cpp` uses `device_ids: ['1']` (explicitly GPU 1)
+- `llama-cpp` uses `device_ids: ['0']` (explicitly GPU 0)
 
-If your GPU layout differs from the default, edit `docker-compose.yml` accordingly and verify with:
+Check your layout with:
 ```bash
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader
 ```
+
+### Splitting across two GPUs
+
+With a second card, moving the notes sidecar off the transcription GPU means neither has to wait on the other's VRAM. Put this in `docker-compose.override.yml` (gitignored, applied automatically by `docker compose`):
+
+```yaml
+services:
+  llama-cpp:
+    deploy:
+      resources:
+        reservations:
+          # !override replaces the list. Without it compose *appends*, and the
+          # GPU 0 reservation from docker-compose.yml is still requested.
+          devices: !override
+            - driver: nvidia
+              device_ids: ['1']
+              capabilities: [gpu]
+```
+
+The same file is the right place for any other machine-local deviation — a different host port, a different idle timeout.
 
 ### Install NVIDIA Container Toolkit
 
