@@ -85,8 +85,10 @@ PY
 echo "==> Checking $OUTPUT_DIR for a written note"
 [ -d "$OUTPUT_DIR" ] || fail "output dir $OUTPUT_DIR does not exist"
 
-# The service writes to {OUTPUT_DIR}/{sanitized video title}/notes.md. Take the
-# most recently modified one rather than guessing at the sanitized title.
+# The service writes to {OUTPUT_DIR}/{sanitized video title}/notes.md. Match on
+# "written since this run started" rather than guessing at the sanitized title.
+# find returns directory order, not newest-first, so take any match — the
+# -newermt filter is what makes it this run's note.
 note=$(find "$OUTPUT_DIR" -name notes.md -newermt "@$started" -print 2>/dev/null | head -n 1)
 [ -n "$note" ] || fail "no notes.md written under $OUTPUT_DIR since this run started"
 [ -s "$note" ] || fail "note $note is empty"
