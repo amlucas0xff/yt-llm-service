@@ -5,9 +5,11 @@
 - What failed and why:
   Running tests inside the service image via `/app/.venv/bin/pytest` failed because the image's virtualenv entrypoints point at a non-existent host-specific Python path. Using the image's system Python without the venv also failed because CLI/API dependencies were not on `sys.path`.
 - Working approach:
-  Use `uv run` from the repo root with a writable `TEMP_DIR` and `OUTPUT_DIR`, prepend a fake `yt-dlp` shim to `PATH`, and prepend `tests/stubs`, repo root, and `src` to `PYTHONPATH`.
+  Run `make test`. Superseded as of 2026-08-11: the manual recipe this note used to carry — `uv run` with hand-set `TEMP_DIR`/`OUTPUT_DIR`, a `yt-dlp` shim on `PATH`, and a three-entry `PYTHONPATH` — now lives in `conftest.py` (commit `05aede7`), so `pytest tests/` works from a bare checkout too. See "Running tests" in `README.md`.
 - Foundations needed:
-  `run_llm_api.py` instantiates `Config()` and `AudioDownloader()` at import time, so tests need writable app directories and a discoverable `yt-dlp` binary even when all runtime behavior is mocked.
+  `run_llm_api.py` instantiates `Config()` and `AudioDownloader()` at import time, so tests need writable app directories and a discoverable `yt-dlp` binary even when all runtime behavior is mocked. This is also why `conftest.py` sets everything up in module-level statements rather than fixtures — fixtures run after collection has already imported the module.
+- Do not trust a green suite as proof the system works:
+  `make test` is fully mocked and stayed green through a guaranteed yt-dlp crash, an unbuildable sidecar image, a completely dead Obsidian integration, and a broken provenance link. All four surfaced only from `./scripts/smoke.sh`, which is the only check that runs WhisperX and llama-cpp for real. Run it before believing the suite.
 
 ## 2026-03-05 OCR GPU POC dependency conflicts
 
