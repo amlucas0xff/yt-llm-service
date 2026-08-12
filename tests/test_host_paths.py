@@ -10,18 +10,12 @@ from config import Config
 
 
 def make_config(tmp_path, host_output_dir=None):
-    """Config with a writable OUTPUT_DIR — Config.__init__ mkdirs it.
-
-    load_dotenv is stubbed out: Config() otherwise reads the developer's real
-    .env from the repo root, so whatever HOST_OUTPUT_DIR they happen to have
-    set would decide the result of these tests.
-    """
+    """Config with a writable OUTPUT_DIR — Config.__init__ mkdirs it."""
     container_out = tmp_path / "container-output"
     env = {"OUTPUT_DIR": str(container_out), "TEMP_DIR": str(tmp_path / "tmp")}
     if host_output_dir:
         env["HOST_OUTPUT_DIR"] = host_output_dir
-    with patch.dict(os.environ, env, clear=False), \
-            patch("dotenv.load_dotenv", lambda *a, **k: None):
+    with patch.dict(os.environ, env, clear=False):
         if not host_output_dir:
             os.environ.pop("HOST_OUTPUT_DIR", None)
         cfg = Config()

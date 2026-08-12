@@ -328,7 +328,9 @@ make test
 
 That is the whole recipe. It runs the unit suite in a throwaway `uv` environment — no virtualenv to activate, no environment variables to set, and none of the ML stack to install (it finishes in seconds).
 
-`conftest.py` does the setup the suite needs: it puts `tests/stubs`, the repo root and `src/` on `sys.path`, points `TEMP_DIR`/`OUTPUT_DIR` at a temporary sandbox, and drops a no-op `yt-dlp` shim on `PATH`. All three matter because `run_llm_api.py` builds a `Config()` and an `AudioDownloader()` at import time.
+`conftest.py` does the setup the suite needs: it puts `tests/stubs`, the repo root and `src/` on `sys.path`, points `TEMP_DIR`/`OUTPUT_DIR` at a temporary sandbox, drops a no-op `yt-dlp` shim on `PATH`, and neuters `python-dotenv`. All four matter because `run_llm_api.py` builds a `Config()` and an `AudioDownloader()` at import time.
+
+The last one is what keeps the suite honest: `Config()` calls `load_dotenv()`, which finds the repo-root `.env`, so without it every test inherits your personal `HF_TOKEN` and `HOST_OUTPUT_DIR` and the results stop meaning anything on anyone else's machine. Tests should set the variables they depend on. A test genuinely *about* env loading can ask for the `real_dotenv` fixture.
 
 `tests/stubs/torch.py` shadows the real `torch` so the suite never pulls a CUDA wheel. Every model call is mocked; nothing here exercises WhisperX or llama-cpp for real — that is what the smoke test below is for.
 
