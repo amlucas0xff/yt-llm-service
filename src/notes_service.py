@@ -9,6 +9,7 @@ IMPORTANT: generate() is async to avoid blocking FastAPI's event loop during
 the long HTTP call to llama-cpp (model generation can take 30-300 seconds).
 """
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
@@ -19,6 +20,7 @@ if TYPE_CHECKING:
     from audio_downloader import VideoContext
 
 from config import Config
+from gpu_policy import GPU_WAIT_SECONDS
 from simple_logger import log_action
 
 logger = logging.getLogger(__name__)
@@ -92,10 +94,48 @@ class NotesService:
 
     def __init__(self, config: Config):
         self.base_url = config.LLAMA_CPP_URL.rstrip("/")
+        self.sidecar_gpu_separate = config.SIDECAR_GPU_SEPARATE
+        self.idle_seconds = config.LLAMA_CPP_IDLE_SECONDS
         self.max_tokens = config.NOTES_MAX_TOKENS
         # connect=30s: llama-server should be up (Docker healthcheck enforces this)
         # read=300s: generation on a 20B model can be slow for long transcripts
         self.timeout = httpx.Timeout(connect=30.0, read=300.0, write=30.0, pool=30.0)
+
+    async def wait_for_gpu(self) -> None:
+        """Wait for this stack's llama-cpp model to leave shared GPU memory."""
+        if self.sidecar_gpu_separate:
+            return
+        try:
+            idle = int(self.idle_seconds)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("Shared GPU: invalid LLAMA_CPP_IDLE_SECONDS") from exc
+        if idle < 0 or idle >= GPU_WAIT_SECONDS:
+            raise RuntimeError(
+                f"Shared GPU: LLAMA_CPP_IDLE_SECONDS must be 0..{GPU_WAIT_SECONDS - 1} "
+                "before GPU transcription; lower the idle interval or pin separate GPUs"
+            )
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                for attempt in range(GPU_WAIT_SECONDS):
+                    response = await client.get(f"{self.base_url}/props")
+                    if response.status_code != 503:
+                        response.raise_for_status()
+                        state = response.json()
+                        if not isinstance(state, dict) or type(state.get("is_sleeping")) is not bool:
+                            raise RuntimeError("llama-cpp /props has no valid is_sleeping state")
+                        if state["is_sleeping"]:
+                            if attempt:
+                                logger.info("llama-cpp released the GPU; starting transcription")
+                            return
+                    if attempt == 0:
+                        logger.info("Waiting for llama-cpp to release the GPU")
+                    await asyncio.sleep(1)
+        except httpx.ConnectError as e:
+            # Only a genuine connection failure proves the optional sidecar is down.
+            logger.warning(f"Could not check llama-cpp GPU state: {e}")
+            return
+
+        raise RuntimeError(f"llama-cpp is still using the GPU after {GPU_WAIT_SECONDS} seconds")
 
     def _truncate_transcript(self, text: str) -> tuple[str, bool]:
         """

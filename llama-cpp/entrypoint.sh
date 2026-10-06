@@ -36,7 +36,7 @@ echo "Model found."
 GPU_LAYERS="${LLAMA_CPP_GPU_LAYERS:-99}"
 echo "Starting llama-server with ${GPU_LAYERS} GPU layers..."
 
-IDLE_SECONDS="${LLAMA_CPP_IDLE_SECONDS:-300}"
+IDLE_SECONDS="${LLAMA_CPP_IDLE_SECONDS:-5}"
 echo "Model will unload from VRAM after ${IDLE_SECONDS}s of idle (--sleep-idle-seconds)"
 
 exec /app/llama-server \

@@ -215,6 +215,12 @@ async def health_check():
     )
 
 
+async def transcribe_with_gpu_release(**kwargs):
+    if transcription_service.device == "cuda":
+        await notes_service.wait_for_gpu()
+    return transcription_service.transcribe_audio(**kwargs)
+
+
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def transcribe_audio(request: TranscriptionRequest):
     """
@@ -251,7 +257,7 @@ async def transcribe_audio(request: TranscriptionRequest):
         )
 
         # Perform transcription
-        result = transcription_service.transcribe_audio(
+        result = await transcribe_with_gpu_release(
             audio_path=request.audio_file_path,
             min_speakers=request.min_speakers,
             max_speakers=request.max_speakers,
@@ -313,7 +319,7 @@ async def transcribe_audio_llm(request: LLMTranscriptionRequest):
         )
 
         # Perform transcription
-        result = transcription_service.transcribe_audio(
+        result = await transcribe_with_gpu_release(
             audio_path=request.audio_file_path,
             min_speakers=request.min_speakers,
             max_speakers=request.max_speakers,
@@ -417,7 +423,7 @@ async def transcribe_youtube(request: YouTubeTranscriptionRequest):
 
         # Step 2: Transcribe the downloaded audio
         logger.info(f"Starting transcription for video: {video_id}")
-        result = transcription_service.transcribe_audio(
+        result = await transcribe_with_gpu_release(
             audio_path=audio_path,
             min_speakers=request.min_speakers,
             max_speakers=request.max_speakers,
@@ -489,7 +495,7 @@ async def transcribe_youtube_llm(request: YouTubeLLMTranscriptionRequest):
 
         # Step 2: Transcribe the downloaded audio
         logger.info(f"Starting transcription for video: {video_id}")
-        result = transcription_service.transcribe_audio(
+        result = await transcribe_with_gpu_release(
             audio_path=audio_path,
             min_speakers=request.min_speakers,
             max_speakers=request.max_speakers,
@@ -624,7 +630,7 @@ async def transcribe_file(
         logger.info(f"Extracted audio to: {audio_path}")
 
         # Perform transcription
-        result = transcription_service.transcribe_audio(
+        result = await transcribe_with_gpu_release(
             audio_path=audio_path,
             min_speakers=min_speakers,
             max_speakers=max_speakers,
@@ -708,7 +714,7 @@ async def transcribe_file_llm(
         logger.info(f"Extracted audio to: {audio_path}")
 
         # Perform transcription
-        result = transcription_service.transcribe_audio(
+        result = await transcribe_with_gpu_release(
             audio_path=audio_path,
             min_speakers=min_speakers,
             max_speakers=max_speakers,

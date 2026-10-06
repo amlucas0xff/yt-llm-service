@@ -17,6 +17,8 @@ services:
     ports:
       - "8002:8002"
     volumes:
+      # Linux host time zone for date.today(); the image has no tzdata.
+      - /etc/localtime:/etc/localtime:ro
       - ./src:/app/src
       - ./data/tmp:/app/tmp
       - ${HOST_OUTPUT_DIR:-./data/output}:/app/output
@@ -36,6 +38,10 @@ services:
       # - ${HOST_CHROME_DIR:-~/.config/google-chrome}:/home/app/.config/google-chrome:ro
     environment:
       - DEVICE=${DEVICE:-cuda}
+      # Set true only when each service is pinned to a different physical GPU.
+      - SIDECAR_GPU_SEPARATE=false
+      # Match the sidecar's effective override, even if set in .env.
+      - LLAMA_CPP_IDLE_SECONDS=${LLAMA_CPP_IDLE_SECONDS:-5}
       - COMPUTE_TYPE=${COMPUTE_TYPE:-float16}
       - WHISPER_MODEL=${WHISPER_MODEL:-large-v3-turbo}
       - BATCH_SIZE=${BATCH_SIZE:-16}
@@ -55,7 +61,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              device_ids: ['0']
               capabilities: [gpu]
 
   llama-cpp:
@@ -74,7 +80,7 @@ services:
       - ./models:/models
     environment:
       - LLAMA_CPP_GPU_LAYERS=${LLAMA_CPP_GPU_LAYERS:-99}
-      - LLAMA_CPP_IDLE_SECONDS=${LLAMA_CPP_IDLE_SECONDS:-300}
+      - LLAMA_CPP_IDLE_SECONDS=${LLAMA_CPP_IDLE_SECONDS:-5}
     deploy:
       resources:
         reservations:

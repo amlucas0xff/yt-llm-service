@@ -1,4 +1,4 @@
-.PHONY: test smoke
+.PHONY: test smoke check-config
 
 # The unit suite mocks every model call and stubs torch (tests/stubs/torch.py),
 # so it needs the API and CLI libraries but none of the ML stack. Keeping the
@@ -20,3 +20,8 @@ test:
 # End-to-end against the real containers. Slow, needs GPUs — run on demand.
 smoke:
 	./scripts/smoke.sh $(ARGS)
+
+# Resolve Compose interpolation and overrides before checking GPU coherence.
+# The script consumes JSON privately and never prints service environment.
+check-config:
+	python3 scripts/check_config.py

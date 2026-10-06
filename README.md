@@ -261,7 +261,8 @@ Returns service status and GPU information.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LLAMA_CPP_GPU_LAYERS` | `99` | GPU layers to offload (99 = all) |
-| `LLAMA_CPP_IDLE_SECONDS` | `300` | Seconds idle before VRAM unload (-1 to disable) |
+| `LLAMA_CPP_IDLE_SECONDS` | `5` | Seconds idle before VRAM unload (-1 only with split GPUs) |
+| `SIDECAR_GPU_SEPARATE` | `false` | API skips GPU wait only with an explicitly pinned split-GPU override |
 | `LLAMA_CPP_HOST_PORT` | `18080` | Host port for reaching the sidecar directly |
 
 See `.env.example` for complete configuration options.
@@ -335,6 +336,8 @@ Generated notes can be automatically mirrored to your Obsidian vault.
 
    `source_transcript` points back at the transcript the notes were made from, translated to its **host** path so it opens from the vault, and quoted so a path containing `: ` cannot break the frontmatter. If `HOST_OUTPUT_DIR` is unset or relative, the field is omitted rather than filled with a path that would not resolve. `truncated: true` means the transcript exceeded `NOTES_MAX_TOKENS` and its middle was dropped before the model saw it — the notes then cover only the beginning and end.
 
+On Linux, Compose binds the host's `/etc/localtime` read-only into the API, so new notes use the host-local date. The image has no tzdata, so `TZ` alone is insufficient. The isolated smoke API gets the same mount; existing vault notes are not rewritten.
+
 The integration is silent: if the config file is absent or `enabled = false`, nothing changes.
 
 ## Running tests
@@ -351,6 +354,8 @@ The last one is what keeps the suite honest: `Config()` calls `load_dotenv()`, w
 
 `tests/stubs/torch.py` shadows the real `torch` so the suite never pulls a CUDA wheel. Every model call is mocked; nothing here exercises WhisperX or llama-cpp for real — that is what the smoke test below is for.
 
+On pushes and pull requests, `.github/workflows/checks.yml` runs the mocked tests, Compose validation and GPU config check with checkout defaults, smoke-script syntax/ShellCheck, and Ruff `E4,E7,E9,F821`. Hosted CI does not run the GPU smoke test, download the 12 GB model, or require `.env` or credentials. Full Ruff `F` is deferred to a separate reviewed cleanup: the wider check currently has 10 baseline findings, including imports used as dependency probes.
+
 Pass pytest arguments through `ARGS`:
 
 ```bash
@@ -366,7 +371,7 @@ make smoke                     # default video
 make smoke ARGS="https://youtu.be/..."
 ```
 
-This is the only check that runs WhisperX and llama-cpp for real. It brings the stack up with `docker compose up -d --wait`, posts a short video to `/transcribe-youtube-llm` with `generate_notes: true`, and fails unless all four hold: HTTP 200, a non-empty transcript in the response, non-empty notes in the response, and a fresh non-empty `notes.md` under `HOST_OUTPUT_DIR`.
+This is the only check that runs WhisperX and llama-cpp for real. It reuses (or starts) the Compose llama-cpp sidecar and runs a disposable API container on the project's network, bound to a free loopback port. The API uses this checkout's `src/` read-only, plus temporary output, audio, config, and Obsidian vault directories. It never mounts or writes the live output or vault, and it leaves the live API alone. Requests go only to the port assigned to the disposable container. The script removes its container and scratch files on exit, including failure or interruption. It checks HTTP 200, non-empty response transcript and notes, a fresh `notes.md`, and a vault note with the host-local date, valid source and a resolvable transcript link.
 
 The default video is [Me at the zoo](https://www.youtube.com/watch?v=jNQXAC9IVRw) — 19 seconds, has speech, and won't be taken down.
 
@@ -377,8 +382,7 @@ Run it on demand rather than on every commit — it is GPU-bound and holds VRAM 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SMOKE_TIMEOUT` | `900` | Seconds to wait for the transcription response |
-| `SMOKE_BASE_URL` | `http://localhost:8002` | Service base URL |
-| `HOST_OUTPUT_DIR` | `./data/output` | Where the script looks for the written note |
+| `SMOKE_TEST_FAIL_AFTER_HEALTH` | `0` | Set to `1` to test cleanup after isolated API health without sending a transcription request |
 
 ## Project Structure
 
@@ -404,7 +408,7 @@ yt-llm-service/
 │   └── stubs/                   # Stand-ins for heavyweight ML packages
 ├── scripts/smoke.sh             # End-to-end test against the real containers
 ├── docs/                        # Documentation
-├── Makefile                     # `make test`, `make smoke`
+├── Makefile                     # `make test`, `make check-config`, `make smoke`
 ├── conftest.py                  # Test session setup (sys.path, dirs, yt-dlp shim)
 ├── docker-compose.yml           # Two-service orchestration
 ├── Dockerfile                   # yt-llm-service container image
@@ -416,7 +420,7 @@ yt-llm-service/
 ## GPU Setup
 
 `docker-compose.yml` puts both services on GPU 0:
-- `yt-llm-service` uses `count: 1` (defaults to GPU 0)
+- `yt-llm-service` is explicitly pinned to GPU 0
 - `llama-cpp` uses `device_ids: ['0']` (explicitly GPU 0)
 
 Check your layout with:
@@ -440,9 +444,12 @@ services:
             - driver: nvidia
               device_ids: ['1']
               capabilities: [gpu]
+  yt-llm-service:
+    environment:
+      SIDECAR_GPU_SEPARATE: "true"
 ```
 
-The same file is the right place for any other machine-local deviation — a different host port, a different idle timeout.
+The marker only belongs in the API service when the GPUs really are separate. `make check-config` checks both services' resolved GPU reservations; a `count: 1` reservation does not prove isolation. Once split, `LLAMA_CPP_IDLE_SECONDS=-1` is allowed and the API skips the wait. The same override file is the right place for any other machine-local deviation — a different host port or idle timeout.
 
 ### Install NVIDIA Container Toolkit
 
@@ -465,7 +472,9 @@ docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu22.04 nvidia-smi
 
 ### VRAM Management
 
-The llama-cpp sidecar unloads the model from VRAM after `LLAMA_CPP_IDLE_SECONDS` (default: 300s). The next request triggers a cold reload (~15s). This is important on shared hardware. Set `LLAMA_CPP_IDLE_SECONDS=-1` to keep the model loaded permanently.
+The llama-cpp sidecar unloads the model from VRAM after `LLAMA_CPP_IDLE_SECONDS` (default: 5s). Before GPU transcription on a shared GPU, the API polls for up to 30 attempts (~30s) for the sidecar to sleep. The next notes request triggers a cold reload (~15s). On shared hardware, idle must be nonnegative and **less than 30s**; `-1` disables sleep and conflicts with the wait. Before starting transcription, run `make check-config`: it inspects effective Compose settings (including `.env` and overrides) without displaying credentials. It does not start or stop services. If the optional sidecar is unreachable, transcription can still proceed; a reachable but awake sidecar times out rather than risking GPU memory contention. With two explicitly pinned GPUs, use the override above to skip the wait.
+
+Compose passes the same effective idle value to the API, which rejects unsafe shared-GPU values on every CUDA request, including when `/props` reports sleeping. Keep overrides of the idle setting consistent in both services; `make check-config` rejects mismatches. Reachable `/props` errors, malformed state, and read timeouts stop transcription before GPU work; only a connection failure is treated as an optional sidecar being down. The isolated smoke API uses the resolved API GPU reservation instead of `--gpus all`; ambiguous reservations fail closed.
 
 ### CPU-Only Fallback (Not Recommended)
 

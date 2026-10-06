@@ -1,0 +1,24 @@
+name: Fast checks
+
+on: [push, pull_request]
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.12'
+      - name: Unit tests (mocked; no model or GPU)
+        run: make test
+      - name: Compose and GPU policy (checkout defaults; no .env)
+        run: |
+          docker compose config --quiet
+          make check-config
+      - name: Smoke script syntax and ShellCheck (no GPU smoke)
+        run: |
+          bash -n scripts/smoke.sh
+          shellcheck scripts/smoke.sh
+      - name: Narrow Ruff baseline
+        run: uvx --from ruff==0.13.3 ruff check --select E4,E7,E9,F821 src tests cli.py

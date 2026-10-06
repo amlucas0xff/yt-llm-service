@@ -40,6 +40,11 @@ class Config:
 
         # Notes service configuration
         self.LLAMA_CPP_URL = os.getenv("LLAMA_CPP_URL", "http://llama-cpp:8080")
+        # Explicit operator declaration; never infer GPU layout from processes.
+        self.SIDECAR_GPU_SEPARATE = os.getenv("SIDECAR_GPU_SEPARATE", "false").lower() == "true"
+        # Compose passes the resolved sidecar idle value to this service too.
+        # Parse at request preflight so an invalid value cannot bypass policy.
+        self.LLAMA_CPP_IDLE_SECONDS = os.getenv("LLAMA_CPP_IDLE_SECONDS", "5")
         self.NOTES_MAX_TOKENS = int(os.getenv("NOTES_MAX_TOKENS", "80000"))
         # LLAMA_CPP_GPU_LAYERS is consumed by docker-compose, stored here for logging only
         self.LLAMA_CPP_GPU_LAYERS = int(os.getenv("LLAMA_CPP_GPU_LAYERS", "99"))

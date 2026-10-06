@@ -107,9 +107,10 @@ async def test_truncation_flag_reflects_real_notes_generation(tmp_path):
     from notes_service import NotesService
     from config import Config
 
-    cfg = MagicMock(spec=Config)
+    cfg = MagicMock(spec=Config, LLAMA_CPP_IDLE_SECONDS=5)
     cfg.LLAMA_CPP_URL = "http://localhost:8080"
     cfg.NOTES_MAX_TOKENS = 10
+    cfg.SIDECAR_GPU_SEPARATE = False
     notes_svc = NotesService(cfg)
 
     resp = MagicMock()
@@ -143,3 +144,17 @@ def test_save_note_quotes_transcript_path_so_frontmatter_stays_valid(tmp_path):
     parsed = yaml.safe_load(front)
     assert parsed["source_transcript"] == awkward
     assert parsed["truncated"] is False
+
+
+def test_linux_compose_binds_host_localtime_read_only():
+    compose = yaml.safe_load((Path(__file__).resolve().parents[1] / "docker-compose.yml").read_text())
+    volumes = compose["services"]["yt-llm-service"]["volumes"]
+    assert "/etc/localtime:/etc/localtime:ro" in volumes
+
+
+def test_smoke_is_pinned_to_its_disposable_api_and_checks_host_date():
+    smoke = (Path(__file__).resolve().parents[1] / "scripts/smoke.sh").read_text()
+    assert 'BASE_URL="http://127.0.0.1:$port"' in smoke
+    assert "SMOKE_BASE_URL" not in smoke
+    assert '--mount "type=bind,src=/etc/localtime,dst=/etc/localtime,readonly"' in smoke
+    assert "fields.get('date') in (start_date, end_date)" in smoke
