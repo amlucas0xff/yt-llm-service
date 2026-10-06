@@ -1,6 +1,6 @@
 # Readiness guardrails — retro items 2–5
 
-**Status:** implemented locally on 2026-10-06. Hosted CI and a real two-GPU run remain unverified. Changes are not committed or pushed.
+**Status:** implemented and pushed on 2026-10-06. [GitHub fast checks](https://github.com/amlucas0xff/yt-llm-service/actions/runs/37407963056) passed. A real two-GPU run remains unverified.
 
 ## Scope and pre-implementation baseline
 
@@ -61,4 +61,4 @@ Implement steps **1 → 2 → 3 → 4**. Re-run `make test`, `make check-config`
 - `make test`: 91 passed. `make check-config`, `docker compose config --quiet`, `bash -n scripts/smoke.sh`, ShellCheck, and Ruff `E4,E7,E9,F821` passed.
 - Real isolated `make smoke` passed after integration. The existing default-video note's hash and modification time did not change; no smoke container or scratch directory remained. The new temporary note had the host-local date and a resolvable transcript link.
 - Negative GPU-config and split-GPU routing cases have unit tests. This host has one GPU, so the two-GPU runtime path was not exercised on hardware.
-- The live API was restarted after code changes and is healthy with the same host-local date as the host. No GitHub-hosted CI run occurred because no commit or push was requested.
+- The live API was restarted after code changes and is healthy with the same host-local date as the host. GitHub-hosted fast checks passed after the first push; the real two-GPU path still needs hardware verification.
